@@ -387,15 +387,13 @@ impl FeedbackNoteView {
                         .into(),
                 );
                 lines.push(Line::from(vec![
-                    "By submitting feedback, you agree that OpenAI can use your feedback for safety purposes and internal model training, as explained in more detail ".dim(),
+                    "Feedback is stored locally only and not sent to any external service. ".dim(),
                     "here".fg(crate::style::accent_color()).underlined(),
                     ". Please avoid sharing tented information under NDA, or privileged, HR-related, or sensitive personal information.".dim(),
                 ]));
             }
             FeedbackAudience::External => lines.push(Line::from(vec![
-                "Your feedback can be used to improve ChatGPT. ".dim(),
-                "Learn more".fg(crate::style::accent_color()).underlined(),
-                ".".dim(),
+                "Feedback is stored locally only.".dim(),
             ])),
         }
         word_wrap_lines(

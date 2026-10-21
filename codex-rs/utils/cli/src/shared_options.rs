@@ -22,13 +22,12 @@ pub struct SharedCliOptions {
     #[arg(long, short = 'm')]
     pub model: Option<String>,
 
-    /// Use open-source provider.
-    #[arg(long = "oss", default_value_t = false)]
+    /// Use open-source local provider (enabled by default in YUGI).
+    #[arg(long = "oss", default_value_t = true)]
     pub oss: bool,
 
-    /// Specify which local provider to use (lmstudio or ollama).
-    /// If not specified with --oss, will use config default or show selection.
-    #[arg(long = "local-provider")]
+    /// Specify which local provider to use (lmstudio or ollama). Defaults to ollama.
+    #[arg(long = "local-provider", default_value = "ollama")]
     pub oss_provider: Option<String>,
 
     /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
