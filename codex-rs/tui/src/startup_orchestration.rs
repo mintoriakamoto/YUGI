@@ -421,19 +421,21 @@ pub(super) async fn run_main_inner(
                 .await?
             {
                 oss_selection::OssProviderDetection::AutoSelected(selection) => selection,
-                oss_selection::OssProviderDetection::NeedsSelection {
-                    lmstudio_status,
-                    ollama_status,
-                } => {
+                oss_selection::OssProviderDetection::NeedsSelection(discovered) => {
                     startup_draft.flush_pending_events().await?;
                     startup_draft
                         .tui_mut()
                         .with_restored(crate::tui::TerminalHandoff::Restore, || {
-                            oss_selection::select_oss_provider(lmstudio_status, ollama_status)
+                            oss_selection::select_oss_provider(discovered)
                         })
                         .await?
                 }
             };
+            // Apply a custom base URL when the selected server is on a non-default port.
+            if let Some(url) = &selection.base_url {
+                // SAFETY: single-threaded startup phase; no other threads read CODEX_OSS_BASE_URL yet.
+                unsafe { std::env::set_var("CODEX_OSS_BASE_URL", url) };
+            }
             let provider = selection.provider;
             if provider == "__CANCELLED__" {
                 return Err(std::io::Error::other(

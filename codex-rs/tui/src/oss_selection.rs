@@ -2,7 +2,8 @@
 //! Discovery and selection outcomes stay independent of the picker layout.
 
 use std::io;
-use std::sync::LazyLock;
+
+use futures::future::join_all;
 
 use crate::bottom_pane::picker_option_list;
 use crate::bottom_pane::render_menu_surface;
@@ -36,7 +37,6 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::*;
-use ratatui::style::Color;
 use ratatui::text::Line;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
@@ -45,43 +45,85 @@ use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use std::time::Duration;
 
+/// A local AI server discovered during port scanning.
 #[derive(Clone)]
-pub(crate) enum ProviderStatus {
-    Running,
-    NotRunning,
-    Unknown,
+pub(crate) struct DiscoveredServer {
+    /// Canonical provider ID ("ollama" or "lmstudio").
+    pub(crate) provider_id: String,
+    /// Port the server is listening on.
+    pub(crate) port: u16,
+    /// Human-readable label for the picker.
+    pub(crate) label: String,
+    /// Short description shown below the picker.
+    pub(crate) description: String,
+    /// Full base URL override (None = use provider default).
+    pub(crate) base_url: Option<String>,
 }
 
-/// Options displayed in the *select* mode.
-///
-/// The `key` is matched case-insensitively.
+/// All known local AI servers and their default ports.
+struct ServerSpec {
+    provider_id: &'static str,
+    port: u16,
+    label: &'static str,
+    description: &'static str,
+}
+
+const KNOWN_SERVERS: &[ServerSpec] = &[
+    ServerSpec {
+        provider_id: OLLAMA_OSS_PROVIDER_ID,
+        port: DEFAULT_OLLAMA_PORT,
+        label: "Ollama",
+        description: "Ollama (port 11434) — default",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: DEFAULT_LMSTUDIO_PORT,
+        label: "LM Studio",
+        description: "LM Studio (port 1234) — OpenAI-compatible",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: 8000,
+        label: "vLLM / LocalAI (8000)",
+        description: "vLLM or compatible server on port 8000",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: 8080,
+        label: "LlamaFile / LocalAI (8080)",
+        description: "LlamaFile or LocalAI on port 8080",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: 5001,
+        label: "Text-gen-webui (5001)",
+        description: "Oobabooga text-generation-webui on port 5001",
+    },
+    ServerSpec {
+        provider_id: OLLAMA_OSS_PROVIDER_ID,
+        port: 11435,
+        label: "Ollama (11435)",
+        description: "Ollama on alternate port 11435",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: 12434,
+        label: "LM Studio (12434)",
+        description: "LM Studio on alternate port 12434",
+    },
+];
+
+/// An option shown in the interactive picker.
 struct SelectOption {
     label: Line<'static>,
-    description: &'static str,
+    description: String,
     key: KeyCode,
-    provider_id: &'static str,
+    provider_id: String,
+    base_url: Option<String>,
 }
-
-static OSS_SELECT_OPTIONS: LazyLock<Vec<SelectOption>> = LazyLock::new(|| {
-    vec![
-        SelectOption {
-            label: Line::from(vec!["L".underlined(), "M Studio".into()]),
-            description: "Local LM Studio server (default port 1234)",
-            key: KeyCode::Char('l'),
-            provider_id: LMSTUDIO_OSS_PROVIDER_ID,
-        },
-        SelectOption {
-            label: Line::from(vec!["O".underlined(), "llama".into()]),
-            description: "Local Ollama server (Responses API, default port 11434)",
-            key: KeyCode::Char('o'),
-            provider_id: OLLAMA_OSS_PROVIDER_ID,
-        },
-    ]
-});
 
 // This startup wizard runs before the main TUI runtime keymap is available, so
 // it retains the built-in horizontal shortcuts alongside vertical navigation.
-// The shared matcher still covers raw C0 Ctrl-H/Ctrl-L terminal reports.
 const MOVE_LEFT_KEYS: [KeyBinding; 2] = [
     key_hint::plain(KeyCode::Left),
     key_hint::ctrl(KeyCode::Char('h')),
@@ -91,33 +133,54 @@ const MOVE_RIGHT_KEYS: [KeyBinding; 2] = [
     key_hint::ctrl(KeyCode::Char('l')),
 ];
 
-pub struct OssSelectionWidget<'a> {
-    select_options: &'a Vec<SelectOption>,
-    provider_statuses: [ProviderStatus; 2],
+pub struct OssSelectionWidget {
+    select_options: Vec<SelectOption>,
 
-    /// Currently selected index in *select* mode.
+    /// Currently selected index.
     selected_option: usize,
 
-    /// Set to `true` once a decision has been sent – the parent view can then
-    /// remove this widget from its queue.
     done: bool,
-
-    selection: Option<String>,
+    selection: Option<(String, Option<String>)>, // (provider_id, base_url)
 }
 
-impl OssSelectionWidget<'_> {
-    fn new(lmstudio_status: ProviderStatus, ollama_status: ProviderStatus) -> Self {
+impl OssSelectionWidget {
+    fn from_discovered(servers: &[DiscoveredServer]) -> Self {
+        let digit_keys: &[char] = &['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+        let options: Vec<SelectOption> = servers
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let key = if i < digit_keys.len() {
+                    KeyCode::Char(digit_keys[i])
+                } else {
+                    KeyCode::Null
+                };
+                SelectOption {
+                    label: Line::from(vec![
+                        Span::raw(s.label.clone()),
+                        Span::styled(
+                            format!(" (port {})", s.port),
+                            Style::default().add_modifier(Modifier::DIM),
+                        ),
+                    ]),
+                    description: s.description.clone(),
+                    key,
+                    provider_id: s.provider_id.clone(),
+                    base_url: s.base_url.clone(),
+                }
+            })
+            .collect();
+
         Self {
-            select_options: &OSS_SELECT_OPTIONS,
-            provider_statuses: [lmstudio_status, ollama_status],
+            select_options: options,
             selected_option: 0,
             done: false,
             selection: None,
         }
     }
 
-    /// Consume a press while the picker is visible, returning a completed decision.
-    pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<String> {
+    /// Consume a key press; returns the completed decision when done.
+    pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<(String, Option<String>)> {
         if key.kind == KeyEventKind::Press {
             self.handle_select_key(key);
         }
@@ -128,9 +191,6 @@ impl OssSelectionWidget<'_> {
         }
     }
 
-    /// Normalize a key for comparison.
-    /// - For `KeyCode::Char`, converts to lowercase for case-insensitive matching.
-    /// - Other key codes are returned unchanged.
     fn normalize_keycode(code: KeyCode) -> KeyCode {
         match code {
             KeyCode::Char(c) => KeyCode::Char(c.to_ascii_lowercase()),
@@ -139,109 +199,104 @@ impl OssSelectionWidget<'_> {
     }
 
     fn handle_select_key(&mut self, key_event: KeyEvent) {
+        let n = self.select_options.len();
         match key_event {
             KeyEvent {
                 code: KeyCode::Char('c'),
                 modifiers,
                 ..
             } if modifiers.contains(KeyModifiers::CONTROL) => {
-                self.send_decision("__CANCELLED__".to_string());
+                self.send_decision("__CANCELLED__".to_string(), None);
             }
             _ if MOVE_LEFT_KEYS.is_pressed(key_event)
                 || matches!(key_event.code, KeyCode::Up | KeyCode::Char('k')) =>
             {
-                self.selected_option = (self.selected_option + self.select_options.len() - 1)
-                    % self.select_options.len();
+                if n > 0 {
+                    self.selected_option = (self.selected_option + n - 1) % n;
+                }
             }
             _ if MOVE_RIGHT_KEYS.is_pressed(key_event)
                 || matches!(key_event.code, KeyCode::Down | KeyCode::Char('j')) =>
             {
-                self.selected_option = (self.selected_option + 1) % self.select_options.len();
+                if n > 0 {
+                    self.selected_option = (self.selected_option + 1) % n;
+                }
             }
             KeyEvent {
                 code: KeyCode::Enter,
                 ..
             } => {
-                let opt = &self.select_options[self.selected_option];
-                self.send_decision(opt.provider_id.to_string());
+                if n > 0 {
+                    let opt = &self.select_options[self.selected_option];
+                    self.send_decision(opt.provider_id.clone(), opt.base_url.clone());
+                }
             }
             KeyEvent {
                 code: KeyCode::Esc, ..
             } => {
-                self.send_decision(LMSTUDIO_OSS_PROVIDER_ID.to_string());
-            }
-            KeyEvent {
-                code: KeyCode::Char('1' | '2'),
-                ..
-            } => {
-                let index = usize::from(key_event.code == KeyCode::Char('2'));
-                self.send_decision(self.select_options[index].provider_id.to_string());
+                // Default to first option on Esc.
+                if n > 0 {
+                    let opt = &self.select_options[0];
+                    self.send_decision(opt.provider_id.clone(), opt.base_url.clone());
+                }
             }
             KeyEvent { code, .. } => {
-                let other = code;
-                let normalized = Self::normalize_keycode(other);
+                let normalized = Self::normalize_keycode(code);
                 if let Some(opt) = self
                     .select_options
                     .iter()
                     .find(|opt| Self::normalize_keycode(opt.key) == normalized)
                 {
-                    self.send_decision(opt.provider_id.to_string());
+                    self.send_decision(opt.provider_id.clone(), opt.base_url.clone());
                 }
             }
         }
     }
 
-    fn send_decision(&mut self, selection: String) {
-        self.selection = Some(selection);
+    fn send_decision(&mut self, provider_id: String, base_url: Option<String>) {
+        self.selection = Some((provider_id, base_url));
         self.done = true;
     }
 
-    /// Returns `true` once the user has made a decision and the widget no
-    /// longer needs to be displayed.
     pub fn is_complete(&self) -> bool {
         self.done
     }
 }
 
-impl WidgetRef for &OssSelectionWidget<'_> {
+impl WidgetRef for &OssSelectionWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
         let mut column = FlexRenderable::new();
         column.push(/*flex*/ 1, RenderableItem::Borrowed(&""));
         column.push(
             /*flex*/ 0,
-            Paragraph::new("Select an open-source provider".bold())
+            Paragraph::new("Select a local AI server".bold())
                 .wrap(Wrap { trim: false })
                 .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
         );
         column.push(
             /*flex*/ 1,
-            Paragraph::new("Choose a local AI server for this session.".dim())
+            Paragraph::new("YUGI detected the following running servers.".dim())
                 .wrap(Wrap { trim: false })
                 .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
         );
         let labels: Vec<_> = self
             .select_options
             .iter()
-            .zip(&self.provider_statuses)
-            .map(|(option, status)| {
-                let (label, color) = match status {
-                    ProviderStatus::Running => ("● Running", Color::Green),
-                    ProviderStatus::NotRunning => ("○ Not running", Color::Red),
-                    ProviderStatus::Unknown => ("? Unknown", Color::Yellow),
-                };
-                let mut line = option.label.clone();
-                line.spans.extend([" · ".dim(), label.fg(color)]);
-                line
-            })
+            .map(|option| option.label.clone())
             .collect();
         column.push(
             /*flex*/ 0,
             picker_option_list(labels, self.selected_option),
         );
+        let desc = self
+            .select_options
+            .get(self.selected_option)
+            .map(|o| o.description.clone())
+            .unwrap_or_default();
         column.push(
             /*flex*/ 1,
-            Paragraph::new(self.select_options[self.selected_option].description.dim())
+            Paragraph::new(Span::styled(desc, Style::default().add_modifier(Modifier::DIM)))
                 .wrap(Wrap { trim: false })
                 .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
         );
@@ -253,8 +308,6 @@ impl WidgetRef for &OssSelectionWidget<'_> {
                 " choose · ".dim(),
                 key_hint::plain(KeyCode::Enter).into(),
                 " select · ".dim(),
-                key_hint::plain(KeyCode::Esc).into(),
-                " LM Studio · ".dim(),
                 key_hint::ctrl(KeyCode::Char('c')).into(),
                 " exit".dim(),
             ]))
@@ -274,57 +327,97 @@ impl WidgetRef for &OssSelectionWidget<'_> {
 pub(crate) struct OssProviderSelection {
     pub(crate) provider: String,
     pub(crate) manually_selected: bool,
+    /// If Some, caller should set CODEX_OSS_BASE_URL to this value.
+    pub(crate) base_url: Option<String>,
 }
 
 pub(crate) enum OssProviderDetection {
     AutoSelected(OssProviderSelection),
-    NeedsSelection {
-        lmstudio_status: ProviderStatus,
-        ollama_status: ProviderStatus,
-    },
+    /// No single server was auto-selected; present a picker with these options.
+    NeedsSelection(Vec<DiscoveredServer>),
 }
 
-/// Probe local providers without suspending the interactive startup composer.
+/// Probe all known local AI server ports in parallel and auto-select if exactly one responds.
 pub(crate) async fn detect_oss_provider() -> OssProviderDetection {
-    // These probes intentionally bypass proxy discovery because both targets are
-    // hardcoded plaintext loopback endpoints. Preserve the legacy custom-CA fallback so an
-    // invalid inherited certificate bundle cannot prevent best-effort provider detection.
+    // Bypass proxy for loopback connections; allow invalid inherited CA bundles.
     #[allow(deprecated)]
     let client = HttpClientBuilder::new().build_direct_with_custom_ca_fallback();
 
-    // Check provider statuses first
-    let lmstudio_status = check_lmstudio_status(&client).await;
-    let ollama_status = check_ollama_status(&client).await;
+    // Probe all ports concurrently.
+    let probes: Vec<_> = KNOWN_SERVERS
+        .iter()
+        .map(|spec| {
+            let c = client.clone();
+            async move {
+                let running = check_port_status(&c, spec.port).await.unwrap_or(false);
+                (spec, running)
+            }
+        })
+        .collect();
 
-    // Autoselect if only one is running
-    match (&lmstudio_status, &ollama_status) {
-        (ProviderStatus::Running, ProviderStatus::NotRunning) => {
-            let provider = LMSTUDIO_OSS_PROVIDER_ID.to_string();
+    let results = join_all(probes).await;
+
+    let mut discovered: Vec<DiscoveredServer> = Vec::new();
+    for (spec, running) in results {
+        if running {
+            let is_default_port = (spec.provider_id == OLLAMA_OSS_PROVIDER_ID
+                && spec.port == DEFAULT_OLLAMA_PORT)
+                || (spec.provider_id == LMSTUDIO_OSS_PROVIDER_ID
+                    && spec.port == DEFAULT_LMSTUDIO_PORT);
+
+            let base_url = if is_default_port {
+                None
+            } else {
+                Some(format!("http://localhost:{}/v1", spec.port))
+            };
+
+            discovered.push(DiscoveredServer {
+                provider_id: spec.provider_id.to_string(),
+                port: spec.port,
+                label: spec.label.to_string(),
+                description: spec.description.to_string(),
+                base_url,
+            });
+        }
+    }
+
+    match discovered.len() {
+        1 => {
+            let server = discovered.remove(0);
             OssProviderDetection::AutoSelected(OssProviderSelection {
-                provider,
+                provider: server.provider_id,
                 manually_selected: false,
+                base_url: server.base_url,
             })
         }
-        (ProviderStatus::NotRunning, ProviderStatus::Running) => {
-            let provider = OLLAMA_OSS_PROVIDER_ID.to_string();
-            OssProviderDetection::AutoSelected(OssProviderSelection {
-                provider,
-                manually_selected: false,
-            })
+        _ => {
+            if discovered.is_empty() {
+                // No servers running — show defaults so user can still pick one to launch.
+                discovered.push(DiscoveredServer {
+                    provider_id: OLLAMA_OSS_PROVIDER_ID.to_string(),
+                    port: DEFAULT_OLLAMA_PORT,
+                    label: "Ollama".to_string(),
+                    description: "Ollama (port 11434) — not detected, but you can start it".to_string(),
+                    base_url: None,
+                });
+                discovered.push(DiscoveredServer {
+                    provider_id: LMSTUDIO_OSS_PROVIDER_ID.to_string(),
+                    port: DEFAULT_LMSTUDIO_PORT,
+                    label: "LM Studio".to_string(),
+                    description: "LM Studio (port 1234) — not detected, but you can start it".to_string(),
+                    base_url: None,
+                });
+            }
+            OssProviderDetection::NeedsSelection(discovered)
         }
-        _ => OssProviderDetection::NeedsSelection {
-            lmstudio_status,
-            ollama_status,
-        },
     }
 }
 
-/// Run the actionable provider picker after provider discovery requires a user decision.
+/// Show the interactive picker and return the user's choice.
 pub(crate) async fn select_oss_provider(
-    lmstudio_status: ProviderStatus,
-    ollama_status: ProviderStatus,
+    discovered: Vec<DiscoveredServer>,
 ) -> io::Result<OssProviderSelection> {
-    let mut widget = OssSelectionWidget::new(lmstudio_status, ollama_status);
+    let mut widget = OssSelectionWidget::from_discovered(&discovered);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -341,11 +434,12 @@ pub(crate) async fn select_oss_provider(
 
         loop {
             if let Event::Key(key_event) = event::read()?
-                && let Some(selection) = widget.handle_key_event(key_event)
+                && let Some((provider_id, base_url)) = widget.handle_key_event(key_event)
             {
                 break Ok(OssProviderSelection {
-                    provider: selection,
+                    provider: provider_id,
                     manually_selected: true,
+                    base_url,
                 });
             }
 
@@ -361,22 +455,6 @@ pub(crate) async fn select_oss_provider(
     result
 }
 
-async fn check_lmstudio_status(client: &HttpClient) -> ProviderStatus {
-    match check_port_status(client, DEFAULT_LMSTUDIO_PORT).await {
-        Ok(true) => ProviderStatus::Running,
-        Ok(false) => ProviderStatus::NotRunning,
-        Err(_) => ProviderStatus::Unknown,
-    }
-}
-
-async fn check_ollama_status(client: &HttpClient) -> ProviderStatus {
-    match check_port_status(client, DEFAULT_OLLAMA_PORT).await {
-        Ok(true) => ProviderStatus::Running,
-        Ok(false) => ProviderStatus::NotRunning,
-        Err(_) => ProviderStatus::Unknown,
-    }
-}
-
 async fn check_port_status(client: &HttpClient, port: u16) -> io::Result<bool> {
     let url = format!("http://localhost:{port}");
 
@@ -386,8 +464,8 @@ async fn check_port_status(client: &HttpClient, port: u16) -> io::Result<bool> {
         .send()
         .await
     {
-        Ok(response) => Ok(response.status().is_success()),
-        Err(_) => Ok(false), // Connection failed = not running
+        Ok(_) => Ok(true), // Any response (even 404) means the server is up.
+        Err(_) => Ok(false),
     }
 }
 
@@ -397,7 +475,23 @@ mod tests {
 
     #[test]
     fn ctrl_h_l_move_provider_selection() {
-        let mut widget = OssSelectionWidget::new(ProviderStatus::Unknown, ProviderStatus::Unknown);
+        let servers = vec![
+            DiscoveredServer {
+                provider_id: LMSTUDIO_OSS_PROVIDER_ID.to_string(),
+                port: DEFAULT_LMSTUDIO_PORT,
+                label: "LM Studio".to_string(),
+                description: "LM Studio".to_string(),
+                base_url: None,
+            },
+            DiscoveredServer {
+                provider_id: OLLAMA_OSS_PROVIDER_ID.to_string(),
+                port: DEFAULT_OLLAMA_PORT,
+                label: "Ollama".to_string(),
+                description: "Ollama".to_string(),
+                base_url: None,
+            },
+        ];
+        let mut widget = OssSelectionWidget::from_discovered(&servers);
 
         assert_eq!(widget.selected_option, 0);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
