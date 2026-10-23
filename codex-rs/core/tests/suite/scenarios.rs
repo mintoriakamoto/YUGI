@@ -190,6 +190,9 @@ mod frozen_cloud_skills;
 #[path = "scenarios_compaction_tests.rs"]
 mod compaction;
 
+#[path = "scenarios_read_only_mcp.rs"]
+mod read_only_mcp;
+
 fn skills_extensions() -> Arc<ExtensionRegistry<Config>> {
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
     install(&mut extensions, |config: &Config| SkillsExtensionConfig {
