@@ -116,6 +116,7 @@ pub struct McpManager {
     codex_apps_tools_cache: ConnectorRuntimeManager<ToolInfo>,
     tool_catalog_cache: McpToolCatalogCache,
     shared_definitions: Arc<SharedMcpDefinitions>,
+    ema_state: Arc<codex_mcp::EmaState>,
 }
 
 impl McpManager {
@@ -139,6 +140,7 @@ impl McpManager {
             codex_apps_tools_cache,
             tool_catalog_cache: McpToolCatalogCache::default(),
             shared_definitions: Arc::new(SharedMcpDefinitions::default()),
+            ema_state: Arc::default(),
         }
     }
 
@@ -212,18 +214,12 @@ impl McpManager {
         plugins_config: &PluginsConfigToml,
         disabled_plugin_ids: &[String],
     ) -> SelectedPluginSnapshot {
-        let roots = context
-            .ready_selected_capability_roots()
-            .unwrap_or_default();
         let mut selected = SelectedPluginSnapshot {
             disabled_plugin_ids: disabled_plugin_ids.to_vec(),
             ..Default::default()
         };
-        let v2 = context.executor_capability_discovery_v2().is_some();
         let available_roots = available_plugin_roots(context);
-        if roots.is_empty() && !v2 {
-            return selected;
-        }
+        // Check hosted plugins even when no executor roots are selected.
         for contributor in self.extensions.mcp_server_contributors() {
             for SelectedPlugin {
                 selected_root_id,
@@ -457,6 +453,7 @@ impl McpManager {
             !selected_plugins.is_empty() || !loaded_plugins.capability_summaries().is_empty();
         let mut mcp_config = config
             .to_mcp_config_with_loaded_plugins(&loaded_plugins, selected_plugin_registrations);
+        mcp_config.ema_state = Arc::clone(&self.ema_state);
         let mut catalog = mcp_config.mcp_server_catalog.to_builder();
         // Isolated sessions do not inherit the implicit Apps connection.
         if mcp_config.apps_enabled
