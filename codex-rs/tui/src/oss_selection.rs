@@ -471,15 +471,15 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     // ── 8B class ─────────────────────────────────────────────────────────────
     (
         "hf.co/DavidAU/Qwen3-8B-Hivemind-Instruct-Heretic-Abliterated-Uncensored-NEO-Imatrix-GGUF:Q4_K_M",
-        "DavidAU  Qwen3-8B Hivemind Heretic abliterated  Q4_K_M  ~5 GB",
+        "DavidAU  Qwen3-8B Hivemind Heretic abliterated  Q4_K_M  ~5 GB  ARC-C:0.558 refusals:8/100",
     ),
     (
         "hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M",
-        "mlabonne Llama-3.1-8B abliterated  Q4_K_M  ~5 GB  32K downloads",
+        "mlabonne Llama-3.1-8B abliterated  Q4_K_M  ~5 GB  GPQA:0.89 IFEval:73.3  32K downloads",
     ),
     (
         "hf.co/SC117/QwenPaw-Flash-9B-heretic-GGUF:Q4_K_M",
-        "SC117    Qwen3-9B QwenPaw-Flash heretic          Q4_K_M  ~6 GB",
+        "SC117    Qwen3-9B QwenPaw-Flash heretic          Q4_K_M  ~6 GB  refusals:3/100",
     ),
     // ── 14B class ────────────────────────────────────────────────────────────
     (
@@ -491,7 +491,7 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     //   SWE-bench Pro 61.7 (base); Heretic KL 0.0535, refusals 0/100; hybrid DeltaNet+Attn
     (
         "hf.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF:Q4_K_M",
-        "DavidAU  Qwen3.8-27B TURBO Heretic  Q4_K_M  ~16 GB  ARC-C:0.735 GPQA:89.2 refusals:0/100",
+        "DavidAU  Qwen3.8-27B TURBO Heretic  Q4_K_M  ~16 GB  ARC-C:0.735 ARC-E:0.882 GPQA:89.2 refusals:11/100 KL:0.0025",
     ),
     // Qwen3.6-27B Fable Fusion: ARC-C 0.711, ARC-E 0.879; Heretic KL 0.0469, refusals 4/100;
     //   MMLU-Redux 93.5, SWE-bench Verified 77.2 (base Qwen3.6-27B); 4M+ total downloads
@@ -536,7 +536,18 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     // ── 26B class (SC117 gemma-4-26B) ────────────────────────────────────────
     (
         "hf.co/SC117/gemma-4-26B-A4B-it-qat-heretic-GGUF:Q4_K_M",
-        "SC117    gemma-4-26B heretic QAT  Q4_K_M  ~16 GB  28K downloads",
+        "SC117    gemma-4-26B heretic QAT  Q4_K_M  ~16 GB  refusals:13/100 KL:0.066  28K downloads",
+    ),
+    // ── 24B class (LFM2.5 MoE uncensored, mradermacher, 2026-10-23) ──────────
+    // LFM2.5-24B-A2B-uncensored2: 24B total / 2B active MoE, heretic-tagged uncensored
+    (
+        "hf.co/mradermacher/LFM2.5-24B-A2B-uncensored2-GGUF:Q4_K_M",
+        "mradermacher LFM2.5-24B-A2B uncensored2 (MoE)  Q4_K_M  ~8 GB  [new 2026-10-23]",
+    ),
+    // LFM2.5-24B-A2B-uncensored2 imatrix variant
+    (
+        "hf.co/mradermacher/LFM2.5-24B-A2B-uncensored2-i1-GGUF:Q4_K_M",
+        "mradermacher LFM2.5-24B-A2B uncensored2 imatrix  Q4_K_M  ~8 GB  [new 2026-10-23]",
     ),
     // ── 31B class (DavidAU gemma-4-31B) ─────────────────────────────────────
     (
@@ -549,6 +560,15 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "DavidAU  Qwen3-48B-A4B Savant Heretic (MoE)  Q4_K_M  ~20 GB",
     ),
     // ── 35B class ────────────────────────────────────────────────────────────
+    // Sage-A1.5 Heretic Abliterated Uncensored (MoE VLM, mradermacher quant, 2026-10-23)
+    (
+        "hf.co/mradermacher/Sage-A1.5-Heretic-Abliterated-Uncensored-GGUF:Q4_K_M",
+        "mradermacher Sage-A1.5 Heretic Abliterated (MoE VLM)  Q4_K_M  [new 2026-10-23]",
+    ),
+    (
+        "hf.co/mradermacher/Sage-A1.5-Heretic-Abliterated-Uncensored-i1-GGUF:Q4_K_M",
+        "mradermacher Sage-A1.5 Heretic Abliterated imatrix (MoE VLM)  Q4_K_M  [new 2026-10-23]",
+    ),
     // SC117 Qwen3.6-35B-A3B MoE uncensored heretic — 65K downloads
     (
         "hf.co/SC117/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-APEX-GGUF:Q4_K_M",
@@ -611,6 +631,12 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/bartowski/dolphin-2.9-llama3-70b-GGUF:Q4_K_M",
         "bartowski dolphin-2.9-llama3-70b uncensored  Q4_K_M  ~43 GB",
     ),
+    // ── 74B MoE class (NVIDIA Nemotron 3.5 Bolt) ─────────────────────────────
+    // 74B total / 9B active, Mamba-2–Transformer hybrid LatentMoE, GPQA-D 86.43
+    (
+        "hf.co/DavidAU/NVIDIA-Nemotron-3.5-Bolt-Turbo-Brilliance-50x-74B-A9B-24GB-GGUF:Q4_K_M",
+        "DavidAU  Nemotron-3.5-Bolt 74B-A9B Turbo (LatentMoE)  Q4_K_M  ~24 GB  GPQA:86.43",
+    ),
     // ── 122B MoE class (SC117, Qwen3.5-122B-A10B) ────────────────────────────
     (
         "hf.co/SC117/Qwen3.5-122B-A10B-Uncensored-APEX-Compact-GGUF:Q4_K_M",
@@ -623,6 +649,11 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF:IQ3_S",
         "DavidAU  177B Flash-Next Abliterated GSQ-RCO  IQ3_S  ~84 GB  GPQA:92.93  [Strata]",
+    ),
+    // huihui-ai Flash-Next v2 — updated abliteration (MoE), 2026-10-19
+    (
+        "hf.co/huihui-ai/Huihui-Qwen3.8-Flash-Next-abliterated-v2-GGUF:Q4_K_M",
+        "huihui-ai Qwen3.8-Flash-Next abliterated v2 (MoE)  Q4_K_M  ~84 GB  [new 2026-10-19]",
     ),
     // SC117 Swift-1.5 — newest SC117 abliteration of Flash-Next GSQ-RCO
     (
