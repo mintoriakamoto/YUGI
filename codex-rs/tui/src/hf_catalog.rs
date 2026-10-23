@@ -15,7 +15,17 @@ use serde::Serialize;
 
 const HF_API: &str = "https://huggingface.co/api";
 /// Authors whose models we scan (abliterated/uncensored GGUF series).
-const CATALOG_AUTHORS: &[&str] = &["DavidAU", "sc117", "bartowski"];
+const CATALOG_AUTHORS: &[&str] = &[
+    "DavidAU",
+    "SC117",
+    "bartowski",
+    "cognitivecomputations",
+    "mlabonne",
+    "mradermacher",
+    "Orenguteng",
+    "UnfilteredAI",
+    "failspy",
+];
 const CACHE_PATH_SUFFIX: &str = ".config/yugi/model_catalog.json";
 /// How many hours before the cache is considered stale.
 const CATALOG_TTL_HOURS: u64 = 24;
@@ -235,26 +245,38 @@ fn is_interesting_model(id: &str) -> bool {
     if !low.contains("gguf") {
         return false;
     }
-    // Must be at least 27B or a known special series
-    let has_big_param = low.contains("27b")
+    // Must be any notable size (8B and up) or a special large series
+    let has_param = low.contains("8b")
+        || low.contains("9b")
+        || low.contains("12b")
+        || low.contains("14b")
+        || low.contains("27b")
         || low.contains("32b")
-        || low.contains("72b")
+        || low.contains("35b")
+        || low.contains("40b")
         || low.contains("70b")
+        || low.contains("72b")
+        || low.contains("123b")
         || low.contains("177b")
+        || low.contains("235b")
         || low.contains("flash-next")
-        || low.contains("gsq-rco")
-        || low.contains("235b");
-    if !has_big_param {
+        || low.contains("gsq-rco");
+    if !has_param {
         return false;
     }
-    // Must be abliterated / uncensored / cyber / crack / drowzee series
+    // Must be abliterated / uncensored / cyber / crack / drowzee / heretic / dolphin series
     low.contains("ablit")
         || low.contains("uncensor")
         || low.contains("cyber")
         || low.contains("crack")
         || low.contains("drowzee")
+        || low.contains("drowzy")
+        || low.contains("heretic")
         || low.contains("flash-next")
         || low.contains("gsq-rco")
+        || low.contains("dolphin")
+        || low.contains("lexi")
+        || low.contains("neural")
 }
 
 /// Parse benchmark scores and ablation metadata from a raw model card README.
@@ -395,16 +417,24 @@ fn pick_quant_and_size(model_id: &str, readme: &str) -> (f32, String) {
     // Rough GB estimate by parameter count
     let size_gb: f32 = if id_low.contains("235b") {
         140.0
+    } else if id_low.contains("123b") {
+        75.0
     } else if id_low.contains("72b") || id_low.contains("70b") {
         43.0
+    } else if id_low.contains("40b") {
+        24.0
+    } else if id_low.contains("35b") {
+        21.0
     } else if id_low.contains("32b") {
         20.0
     } else if id_low.contains("27b") {
         16.0
-    } else if id_low.contains("14b") {
+    } else if id_low.contains("14b") || id_low.contains("13b") {
         10.0
     } else if id_low.contains("12b") {
         8.0
+    } else if id_low.contains("9b") {
+        6.0
     } else if id_low.contains("8b") || id_low.contains("7b") {
         5.0
     } else {
