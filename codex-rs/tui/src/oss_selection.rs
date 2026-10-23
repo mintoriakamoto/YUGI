@@ -92,8 +92,8 @@ const KNOWN_SERVERS: &[ServerSpec] = &[
     ServerSpec {
         provider_id: LMSTUDIO_OSS_PROVIDER_ID,
         port: 8080,
-        label: "LlamaFile / LocalAI (8080)",
-        description: "LlamaFile or LocalAI on port 8080",
+        label: "Strata / LlamaFile (8080)",
+        description: "Strata (github.com/Niko1221/Strata) or LlamaFile on port 8080 — runs 177B sharded models on consumer GPUs",
     },
     ServerSpec {
         provider_id: LMSTUDIO_OSS_PROVIDER_ID,
@@ -504,6 +504,17 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/DavidAU/Qwen3-72B-Cyber-GGUF:Q4_K_M",
         "DavidAU  Qwen3-72B Cyber                  Q4  43 GB",
     ),
+    // ── 177B class (sharded GSQ-RCO, requires Strata engine) ─────────────────
+    // DavidAU Qwen3.8-Flash-Next series: 125B language + 51B embedding + 4B MTP
+    // Run with Strata: github.com/Niko1221/Strata  (port 8080, needs 32 GB+ RAM+VRAM)
+    (
+        "hf.co/DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF:IQ3_S",
+        "DavidAU  177B Flash-Next Abliterated GSQ-RCO IQ3_S  ~84 GB  [Strata]",
+    ),
+    (
+        "hf.co/DavidAU/Qwen3.8-Flash-Next-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF:IQ3_S",
+        "DavidAU  177B Flash-Next Turbo GSQ-RCO         IQ3_S  ~84 GB  [Strata]",
+    ),
 ];
 
 pub(crate) enum OssModelDetection {
@@ -700,6 +711,25 @@ impl WidgetRef for &OssModelWidget {
                     .wrap(Wrap { trim: false })
                     .inset(Insets::vh(0, 2)),
             );
+            if is_strata_model(&opt.id) {
+                column.push(
+                    0,
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(
+                            "★ 177B sharded model — use Strata engine: ",
+                            Style::default().fg(ratatui::style::Color::Yellow),
+                        ),
+                        Span::styled(
+                            "github.com/Niko1221/Strata  (port 8080, needs 32 GB+ RAM+VRAM)",
+                            Style::default()
+                                .fg(ratatui::style::Color::Yellow)
+                                .add_modifier(Modifier::DIM),
+                        ),
+                    ]))
+                    .wrap(Wrap { trim: false })
+                    .inset(Insets::vh(0, 2)),
+                );
+            }
         }
 
         column.push(
@@ -724,6 +754,11 @@ impl WidgetRef for &OssModelWidget {
         render_menu_surface(panel, buf);
         column.render(panel, buf);
     }
+}
+
+/// Returns true for 177B sharded models that benefit from the Strata engine.
+fn is_strata_model(id: &str) -> bool {
+    id.contains("GSQ-RCO") || id.contains("Flash-Next")
 }
 
 /// Fetch the model list from a running server's `/v1/models` endpoint.
