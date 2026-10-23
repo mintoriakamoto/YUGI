@@ -300,9 +300,12 @@ impl WidgetRef for &OssSelectionWidget {
             .unwrap_or_default();
         column.push(
             /*flex*/ 1,
-            Paragraph::new(Span::styled(desc, Style::default().add_modifier(Modifier::DIM)))
-                .wrap(Wrap { trim: false })
-                .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
+            Paragraph::new(Span::styled(
+                desc,
+                Style::default().add_modifier(Modifier::DIM),
+            ))
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
         );
         column.push(/*flex*/ 1, RenderableItem::Borrowed(&""));
         column.push(
@@ -401,14 +404,16 @@ pub(crate) async fn detect_oss_provider() -> OssProviderDetection {
                     provider_id: OLLAMA_OSS_PROVIDER_ID.to_string(),
                     port: DEFAULT_OLLAMA_PORT,
                     label: "Ollama".to_string(),
-                    description: "Ollama (port 11434) — YUGI will show model picker on start".to_string(),
+                    description: "Ollama (port 11434) — YUGI will show model picker on start"
+                        .to_string(),
                     base_url: None,
                 });
                 discovered.push(DiscoveredServer {
                     provider_id: LMSTUDIO_OSS_PROVIDER_ID.to_string(),
                     port: DEFAULT_LMSTUDIO_PORT,
                     label: "LM Studio".to_string(),
-                    description: "LM Studio (port 1234) — YUGI will show model picker on start".to_string(),
+                    description: "LM Studio (port 1234) — YUGI will show model picker on start"
+                        .to_string(),
                     base_url: None,
                 });
             }
@@ -984,17 +989,24 @@ impl OssModelWidget {
             let offset = installed.len();
             // Prefer live catalog (scored + fresher) over the static fallback list.
             let live_catalog = hf_catalog::load_catalog();
-            let catalog_pairs: Vec<(String, String, String)> = if let Some(ref entries) = live_catalog {
-                entries
-                    .iter()
-                    .map(|e| (e.pull_id.clone(), e.display.clone(), e.benchmarks.score_summary()))
-                    .collect()
-            } else {
-                PREFERRED_MODELS
-                    .iter()
-                    .map(|(id, disp)| (id.to_string(), disp.to_string(), String::new()))
-                    .collect()
-            };
+            let catalog_pairs: Vec<(String, String, String)> =
+                if let Some(ref entries) = live_catalog {
+                    entries
+                        .iter()
+                        .map(|e| {
+                            (
+                                e.pull_id.clone(),
+                                e.display.clone(),
+                                e.benchmarks.score_summary(),
+                            )
+                        })
+                        .collect()
+                } else {
+                    PREFERRED_MODELS
+                        .iter()
+                        .map(|(id, disp)| (id.to_string(), disp.to_string(), String::new()))
+                        .collect()
+                };
 
             for (i, (model_id, desc, score_hint)) in catalog_pairs.iter().enumerate() {
                 let already = installed.iter().any(|m| m.as_str() == model_id.as_str());
@@ -1010,7 +1022,10 @@ impl OssModelWidget {
                 options.push(ModelOption {
                     id: model_id.to_string(),
                     label: Line::from(vec![
-                        Span::styled("[install] ", Style::default().fg(ratatui::style::Color::Yellow)),
+                        Span::styled(
+                            "[install] ",
+                            Style::default().fg(ratatui::style::Color::Yellow),
+                        ),
                         Span::raw(desc.to_string()),
                     ]),
                     key,
@@ -1080,11 +1095,7 @@ impl OssModelWidget {
                 }
             }
         }
-        if self.done {
-            self.result.clone()
-        } else {
-            None
-        }
+        if self.done { self.result.clone() } else { None }
     }
 }
 
@@ -1110,15 +1121,20 @@ impl WidgetRef for &OssModelWidget {
         let subtitle = if installed_count == 0 {
             "Choose a model to install:".to_string()
         } else if self.options.len() > installed_count {
-            format!("{installed_count} installed  ·  press Enter or a digit to select, or [install] to download")
+            format!(
+                "{installed_count} installed  ·  press Enter or a digit to select, or [install] to download"
+            )
         } else {
             "↑/↓ to navigate".to_string()
         };
         column.push(
             1,
-            Paragraph::new(Span::styled(subtitle, Style::default().add_modifier(Modifier::DIM)))
-                .wrap(Wrap { trim: false })
-                .inset(Insets::vh(0, 2)),
+            Paragraph::new(Span::styled(
+                subtitle,
+                Style::default().add_modifier(Modifier::DIM),
+            ))
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(0, 2)),
         );
 
         let labels: Vec<Line<'static>> = self.options.iter().map(|o| o.label.clone()).collect();
@@ -1132,9 +1148,12 @@ impl WidgetRef for &OssModelWidget {
             };
             column.push(
                 1,
-                Paragraph::new(Span::styled(note, Style::default().add_modifier(Modifier::DIM)))
-                    .wrap(Wrap { trim: false })
-                    .inset(Insets::vh(0, 2)),
+                Paragraph::new(Span::styled(
+                    note,
+                    Style::default().add_modifier(Modifier::DIM),
+                ))
+                .wrap(Wrap { trim: false })
+                .inset(Insets::vh(0, 2)),
             );
             if !opt.score_hint.is_empty() {
                 column.push(
@@ -1201,12 +1220,7 @@ fn is_strata_model(id: &str) -> bool {
 async fn fetch_models_from_url(url: &str) -> Vec<String> {
     #[allow(deprecated)]
     let client = HttpClientBuilder::new().build_direct_with_custom_ca_fallback();
-    let resp = match client
-        .get(url)
-        .timeout(Duration::from_secs(4))
-        .send()
-        .await
-    {
+    let resp = match client.get(url).timeout(Duration::from_secs(4)).send().await {
         Ok(r) => r,
         Err(_) => return vec![],
     };
@@ -1350,14 +1364,15 @@ pub(crate) async fn pull_oss_model_with_tui(model: &str) -> io::Result<()> {
                 match stdout_reader.next_line().await {
                     Ok(Some(line)) => {
                         // Ollama emits JSON progress lines; show the "status" field if present.
-                        let display = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                            v.get("status")
-                                .and_then(|s| s.as_str())
-                                .map(str::to_string)
-                                .unwrap_or(line)
-                        } else {
-                            line
-                        };
+                        let display =
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                                v.get("status")
+                                    .and_then(|s| s.as_str())
+                                    .map(str::to_string)
+                                    .unwrap_or(line)
+                            } else {
+                                line
+                            };
                         lines.push(display);
                     }
                     _ => break,
@@ -1376,9 +1391,7 @@ pub(crate) async fn pull_oss_model_with_tui(model: &str) -> io::Result<()> {
             // Check for Ctrl+C.
             if crossterm::event::poll(Duration::from_millis(100))? {
                 if let Event::Key(k) = event::read()? {
-                    if k.code == KeyCode::Char('c')
-                        && k.modifiers.contains(KeyModifiers::CONTROL)
-                    {
+                    if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
                         let _ = child.kill().await;
                         return Err(io::Error::other("cancelled"));
                     }
@@ -1429,14 +1442,23 @@ fn render_pull_screen(f: &mut ratatui::Frame, model: &str, lines: &[String]) {
     column.push(1, RenderableItem::Borrowed(&""));
 
     // Show last N lines of progress output.
-    let show: Vec<&str> = lines.iter().rev().take(12).rev().map(String::as_str).collect();
+    let show: Vec<&str> = lines
+        .iter()
+        .rev()
+        .take(12)
+        .rev()
+        .map(String::as_str)
+        .collect();
     for line in show {
         let owned = line.to_string();
         column.push(
             0,
-            Paragraph::new(Span::styled(owned, Style::default().add_modifier(Modifier::DIM)))
-                .wrap(Wrap { trim: false })
-                .inset(Insets::vh(0, 2)),
+            Paragraph::new(Span::styled(
+                owned,
+                Style::default().add_modifier(Modifier::DIM),
+            ))
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(0, 2)),
         );
     }
     column.push(1, RenderableItem::Borrowed(&""));

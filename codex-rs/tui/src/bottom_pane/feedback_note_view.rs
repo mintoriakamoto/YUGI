@@ -392,9 +392,9 @@ impl FeedbackNoteView {
                     ". Please avoid sharing tented information under NDA, or privileged, HR-related, or sensitive personal information.".dim(),
                 ]));
             }
-            FeedbackAudience::External => lines.push(Line::from(vec![
-                "Feedback is stored locally only.".dim(),
-            ])),
+            FeedbackAudience::External => {
+                lines.push(Line::from(vec!["Feedback is stored locally only.".dim()]))
+            }
         }
         word_wrap_lines(
             lines,

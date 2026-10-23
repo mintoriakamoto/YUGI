@@ -62,8 +62,7 @@ fn number_shortcuts_select_provider() {
     for (key, idx) in [('1', 0usize), ('2', 1usize)] {
         let servers = make_two_servers();
         let mut widget = OssSelectionWidget::from_discovered(&servers);
-        let result =
-            widget.handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+        let result = widget.handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
         assert!(result.is_some(), "key {key} should produce a selection");
         let (provider_id, base_url) = result.unwrap();
         assert_eq!(provider_id, servers[idx].provider_id);

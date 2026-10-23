@@ -34,12 +34,12 @@ const CATALOG_AUTHORS: &[&str] = &[
     "RichardErkhov",
     "casperhansen",
     // — Creative / roleplay fine-tuners (uncensored) ————————————————————————
-    "TheDrummer",          // Artemis/Skyfall/Anubis/Valkyrie/Rocinante series
-    "Epiculous",           // Violet_Twilight/Effervescence
-    "sophosympatheia",     // Midnight-Miqu series
-    "ddh0",                // Qwen3.5-27B Heretic Marvin; DeepSeek uncensored
-    "nbeerbower",          // Huihui-Qwen3.5-27B Athanorlite ORPO abliterated
-    "grimjim",             // gemma-3 abliterated
+    "TheDrummer",            // Artemis/Skyfall/Anubis/Valkyrie/Rocinante series
+    "Epiculous",             // Violet_Twilight/Effervescence
+    "sophosympatheia",       // Midnight-Miqu series
+    "ddh0",                  // Qwen3.5-27B Heretic Marvin; DeepSeek uncensored
+    "nbeerbower",            // Huihui-Qwen3.5-27B Athanorlite ORPO abliterated
+    "grimjim",               // gemma-3 abliterated
     "cognitivecomputations", // dolphin series
     // — Other active abliteration authors ——————————————————————————————————
     "Nitral-AI",
@@ -52,16 +52,16 @@ const CATALOG_AUTHORS: &[&str] = &[
     "smirki",
     "h2oai",
     // — CRACK / multi-tier abliteration specialists ————————————————————————
-    "dealignai",             // CRACK series: Bonsai-27B ternary, MiniCPM-35B, Bolt-74B
-    "BoldingBuilds",         // in-place abliteration on NVIDIA quantized GGUFs
+    "dealignai",     // CRACK series: Bonsai-27B ternary, MiniCPM-35B, Bolt-74B
+    "BoldingBuilds", // in-place abliteration on NVIDIA quantized GGUFs
     // — October 2026 additions ————————————————————————————————————————————
-    "0bserverx",             // RVN triple-ARA abliteration (KL:0.0085), 1M+ downloads
-    "philbert440",           // Qwen3.8-27B cyber-specialized, 507K downloads
-    "dima6312",              // Flint-40B abliterix+Optuna, MITRE refusals 0%
+    "0bserverx",   // RVN triple-ARA abliteration (KL:0.0085), 1M+ downloads
+    "philbert440", // Qwen3.8-27B cyber-specialized, 507K downloads
+    "dima6312",    // Flint-40B abliterix+Optuna, MITRE refusals 0%
     // — HauhauCS family (0/465 refusals, FastMTP, K_P quants) ─────────────────
-    "HauhauCS",              // Aggressive/Balanced series: Gemma-4E4B, 9B/12B/26B/27B/35B/122B
-    "JonathanColetti",       // Qwen3.8-27B-Uncensored heretic (KL:0.0141, 2.4M downloads)
-    "LuffyTheFox",           // Genesis noise-repair method (Marchenko-Pastur) on HauhauCS base
+    "HauhauCS",        // Aggressive/Balanced series: Gemma-4E4B, 9B/12B/26B/27B/35B/122B
+    "JonathanColetti", // Qwen3.8-27B-Uncensored heretic (KL:0.0141, 2.4M downloads)
+    "LuffyTheFox",     // Genesis noise-repair method (Marchenko-Pastur) on HauhauCS base
 ];
 const CACHE_PATH_SUFFIX: &str = ".config/yugi/model_catalog.json";
 /// How many hours before the cache is considered stale.
@@ -208,9 +208,7 @@ pub async fn refresh_catalog() -> Vec<CatalogEntry> {
     let mut entries: Vec<CatalogEntry> = Vec::new();
 
     for author in CATALOG_AUTHORS {
-        let url = format!(
-            "{HF_API}/models?author={author}&filter=gguf&sort=downloads&limit=100"
-        );
+        let url = format!("{HF_API}/models?author={author}&filter=gguf&sort=downloads&limit=100");
         let text = match client
             .get(&url)
             .timeout(Duration::from_secs(20))
@@ -228,10 +226,14 @@ pub async fn refresh_catalog() -> Vec<CatalogEntry> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let Some(arr) = models.as_array() else { continue };
+        let Some(arr) = models.as_array() else {
+            continue;
+        };
 
         for item in arr {
-            let Some(model_id) = item.get("modelId").and_then(|v| v.as_str()) else { continue };
+            let Some(model_id) = item.get("modelId").and_then(|v| v.as_str()) else {
+                continue;
+            };
 
             if !is_interesting_model(model_id) {
                 continue;
@@ -358,9 +360,7 @@ pub fn parse_benchmarks(readme: &str) -> ModelBenchmarks {
         }
 
         // HumanEval
-        if (low.contains("humaneval")
-            || low.contains("human_eval")
-            || low.contains("human eval"))
+        if (low.contains("humaneval") || low.contains("human_eval") || low.contains("human eval"))
             && bm.humaneval.is_none()
         {
             bm.humaneval = extract_score(line);
@@ -433,7 +433,10 @@ fn extract_percentage(line: &str) -> Option<f32> {
         .rfind(|c: char| !c.is_ascii_digit() && c != '.')
         .map(|i| i + 1)
         .unwrap_or(0);
-    before[start..].parse::<f32>().ok().filter(|_| bytes[pct_pos] == b'%')
+    before[start..]
+        .parse::<f32>()
+        .ok()
+        .filter(|_| bytes[pct_pos] == b'%')
 }
 
 /// Choose the best quant to recommend and estimate its disk size.
@@ -442,10 +445,7 @@ fn pick_quant_and_size(model_id: &str, readme: &str) -> (f32, String) {
     let id_low = model_id.to_lowercase();
 
     // IQ3_S for 177B sharded (Strata) models
-    if id_low.contains("gsq-rco")
-        || id_low.contains("flash-next")
-        || id_low.contains("177b")
-    {
+    if id_low.contains("gsq-rco") || id_low.contains("flash-next") || id_low.contains("177b") {
         return (84.0, "IQ3_S".to_string());
     }
 
