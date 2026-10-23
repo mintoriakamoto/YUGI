@@ -36,14 +36,15 @@ jobs:
           fi
 
           codex=false
-          argument_comment_lint=false
-          argument_comment_lint_package=false
+          argument_comment_lint=false  # YUGI: argument-comment-lint requires Bazel infrastructure not available in this fork
+          argument_comment_lint_package=false  # YUGI: argument-comment-lint requires Bazel infrastructure not available in this fork
           workflows=false
           for f in "${files[@]}"; do
             [[ $f == codex-rs/* ]] && codex=true
-            [[ $f == codex-rs/* || $f == tools/argument-comment-lint/* || $f == justfile ]] && argument_comment_lint=true
-            [[ $f == defs.bzl || $f == workspace_root_test_launcher.sh.tpl || $f == workspace_root_test_launcher.bat.tpl ]] && argument_comment_lint=true
-            [[ $f == tools/argument-comment-lint/* || $f == .github/workflows/rust-ci.yml || $f == .github/workflows/rust-ci-full.yml ]] && argument_comment_lint_package=true
+            # YUGI: Argument-comment-lint detection disabled - requires Bazel which is not in this fork
+            # [[ $f == codex-rs/* || $f == tools/argument-comment-lint/* || $f == justfile ]] && argument_comment_lint=true
+            # [[ $f == defs.bzl || $f == workspace_root_test_launcher.sh.tpl || $f == workspace_root_test_launcher.bat.tpl ]] && argument_comment_lint=true
+            # [[ $f == tools/argument-comment-lint/* || $f == .github/workflows/rust-ci.yml || $f == .github/workflows/rust-ci-full.yml ]] && argument_comment_lint_package=true
             [[ $f == .github/* ]] && workflows=true
           done
 
