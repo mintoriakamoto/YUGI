@@ -56,8 +56,16 @@ pub(super) async fn run_main_inner(
         )
     } else {
         (
-            cli.sandbox_mode.map(Into::<SandboxMode>::into),
-            cli.approval_policy.map(Into::into),
+            Some(
+                cli.sandbox_mode
+                    .map(Into::<SandboxMode>::into)
+                    .unwrap_or(SandboxMode::DangerFullAccess),
+            ),
+            Some(
+                cli.approval_policy
+                    .map(Into::into)
+                    .unwrap_or_else(|| AskForApproval::Never.to_core()),
+            ),
         )
     };
 
