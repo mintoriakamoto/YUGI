@@ -460,15 +460,86 @@ pub(super) async fn run_main_inner(
         ));
     }
 
-    // When using `--oss`, let the bootstrapper pick the model based on selected provider
+    // Phase 2 — model discovery, picker, and auto-install.
+    // Runs when --oss is active and the user did not supply an explicit -m.
+    let model_from_discovery: Option<String> = if cli.oss && cli.model.is_none() {
+        if let Some(provider_id) = model_provider_override.as_deref() {
+            let base_url_opt = std::env::var("CODEX_OSS_BASE_URL").ok();
+            // The env var (if set) includes a trailing /v1; strip it so we can
+            // append /v1/models ourselves in detect_oss_model.
+            let base_url_for_models = base_url_opt
+                .as_deref()
+                .map(|u| u.trim_end_matches("/v1").to_string());
+
+            let detection = startup_draft
+                .run_until(oss_selection::detect_oss_model(
+                    provider_id,
+                    base_url_for_models.as_deref(),
+                ))
+                .await?;
+
+            let model_result = match detection {
+                oss_selection::OssModelDetection::AutoSelected(m) => {
+                    oss_selection::OssModelResult {
+                        model: m,
+                        needs_install: false,
+                    }
+                }
+                oss_selection::OssModelDetection::NeedsSelection {
+                    installed,
+                    can_pull,
+                    provider_id: ref pid,
+                    ..
+                } => {
+                    let server_label = if pid == codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID {
+                        "Ollama"
+                    } else {
+                        "LM Studio"
+                    };
+                    startup_draft.flush_pending_events().await?;
+                    startup_draft
+                        .tui_mut()
+                        .with_restored(crate::tui::TerminalHandoff::Restore, || {
+                            oss_selection::select_oss_model(server_label, installed, can_pull)
+                        })
+                        .await?
+                }
+            };
+
+            if model_result.model == "__CANCELLED__" {
+                return Err(std::io::Error::other("model selection cancelled by user"));
+            }
+
+            if model_result.needs_install {
+                let model_to_pull = model_result.model.clone();
+                startup_draft.flush_pending_events().await?;
+                startup_draft
+                    .tui_mut()
+                    .with_restored(crate::tui::TerminalHandoff::Restore, || {
+                        oss_selection::pull_oss_model_with_tui(&model_to_pull)
+                    })
+                    .await?;
+            }
+
+            Some(model_result.model)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // When using `--oss`, resolve the model from discovery then fall back to the
+    // provider's compiled-in default.
     let model = if let Some(model) = &cli.model {
         Some(model.clone())
     } else if cli.oss {
-        // Use the provider from model_provider_override
-        model_provider_override
-            .as_ref()
-            .and_then(|provider_id| get_default_model_for_oss_provider(provider_id))
-            .map(std::borrow::ToOwned::to_owned)
+        model_from_discovery.or_else(|| {
+            model_provider_override
+                .as_ref()
+                .and_then(|provider_id| get_default_model_for_oss_provider(provider_id))
+                .map(std::borrow::ToOwned::to_owned)
+        })
     } else {
         None // No model specified, will use the default.
     };

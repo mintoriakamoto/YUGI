@@ -2,8 +2,10 @@
 //! Discovery and selection outcomes stay independent of the picker layout.
 
 use std::io;
+use std::process::Stdio;
 
 use futures::future::join_all;
+use tokio::io::AsyncBufReadExt as _;
 
 use crate::bottom_pane::picker_option_list;
 use crate::bottom_pane::render_menu_surface;
@@ -397,14 +399,14 @@ pub(crate) async fn detect_oss_provider() -> OssProviderDetection {
                     provider_id: OLLAMA_OSS_PROVIDER_ID.to_string(),
                     port: DEFAULT_OLLAMA_PORT,
                     label: "Ollama".to_string(),
-                    description: "Ollama (port 11434) — run: ollama pull qwen3:8b  (or DavidAU/Drowzey, Sc117, Crack 27B GGUF via hf.co/...)".to_string(),
+                    description: "Ollama (port 11434) — YUGI will show model picker on start".to_string(),
                     base_url: None,
                 });
                 discovered.push(DiscoveredServer {
                     provider_id: LMSTUDIO_OSS_PROVIDER_ID.to_string(),
                     port: DEFAULT_LMSTUDIO_PORT,
                     label: "LM Studio".to_string(),
-                    description: "LM Studio (port 1234) — load qwen3-8b-instruct or DavidAU/Drowzey GGUF from HuggingFace".to_string(),
+                    description: "LM Studio (port 1234) — YUGI will show model picker on start".to_string(),
                     base_url: None,
                 });
             }
@@ -453,6 +455,518 @@ pub(crate) async fn select_oss_provider(
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
     result
+}
+
+// ---------------------------------------------------------------------------
+// Model discovery, picker and auto-install
+// ---------------------------------------------------------------------------
+
+/// Curated HuggingFace GGUF models — abliterated / uncensored, high SWE-bench,
+/// Cyber variants, and 27B+. All use the Ollama `hf.co/<author>/<repo>` syntax.
+static PREFERRED_MODELS: &[(&str, &str)] = &[
+    // ── 8B class ─────────────────────────────────────────────────────────────
+    (
+        "hf.co/DavidAU/Qwen3-8B-Drowzee-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-8B Drowzee (abliterated) Q4   5 GB",
+    ),
+    (
+        "hf.co/sc117/Qwen3-8B-ablit-GGUF:Q4_K_M",
+        "Sc117    Qwen3-8B abliterated             Q4   5 GB",
+    ),
+    (
+        "hf.co/DavidAU/Qwen3-8B-Cyber-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-8B Cyber (uncensored)      Q4   5 GB",
+    ),
+    // ── 12–14B class ─────────────────────────────────────────────────────────
+    (
+        "hf.co/DavidAU/Drowzee-Gemma-3-12B-Abliterated-GGUF:Q4_K_M",
+        "DavidAU  Drowzee Gemma3-12B abliterated   Q4   8 GB",
+    ),
+    (
+        "hf.co/DavidAU/Qwen3-14B-Cyber-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-14B Cyber                  Q4  10 GB",
+    ),
+    // ── 27–32B class (high SWE-bench / novel) ────────────────────────────────
+    (
+        "hf.co/DavidAU/Qwen3-Crack-27B-Instruct-GGUF:Q4_K_M",
+        "DavidAU  Crack-27B (SWE-score)            Q4  16 GB",
+    ),
+    (
+        "hf.co/DavidAU/Qwen3-Crack-32B-Instruct-GGUF:Q4_K_M",
+        "DavidAU  Crack-32B uncensored             Q4  20 GB",
+    ),
+    (
+        "hf.co/DavidAU/Qwen3-32B-Cyber-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-32B Cyber                  Q4  20 GB",
+    ),
+    // ── 72B class ────────────────────────────────────────────────────────────
+    (
+        "hf.co/DavidAU/Qwen3-72B-Cyber-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-72B Cyber                  Q4  43 GB",
+    ),
+];
+
+pub(crate) enum OssModelDetection {
+    /// Exactly one model is installed — use it automatically.
+    AutoSelected(String),
+    /// Zero or multiple models — show the picker.
+    NeedsSelection {
+        installed: Vec<String>,
+        can_pull: bool,
+        provider_id: String,
+        base_url: Option<String>,
+    },
+}
+
+pub(crate) struct OssModelResult {
+    pub(crate) model: String,
+    /// True when the model is not yet installed and must be pulled first.
+    pub(crate) needs_install: bool,
+}
+
+// An option row in the model picker.
+struct ModelOption {
+    id: String,
+    label: Line<'static>,
+    key: KeyCode,
+    is_installed: bool,
+}
+
+pub(crate) struct OssModelWidget {
+    server_label: String,
+    options: Vec<ModelOption>,
+    selected: usize,
+    done: bool,
+    result: Option<(String, bool)>, // (model_id, needs_install)
+}
+
+impl OssModelWidget {
+    fn new(server_label: &str, installed: &[String], can_pull: bool) -> Self {
+        let digit_keys: &[char] = &['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+        let mut options: Vec<ModelOption> = Vec::new();
+
+        for (i, id) in installed.iter().enumerate() {
+            let key = if i < digit_keys.len() {
+                KeyCode::Char(digit_keys[i])
+            } else {
+                KeyCode::Null
+            };
+            options.push(ModelOption {
+                id: id.clone(),
+                label: Line::from(Span::raw(id.clone())),
+                key,
+                is_installed: true,
+            });
+        }
+
+        if can_pull {
+            let offset = installed.len();
+            for (i, (model_id, desc)) in PREFERRED_MODELS.iter().enumerate() {
+                let already = installed.iter().any(|m| m.as_str() == *model_id);
+                if already {
+                    continue;
+                }
+                let idx = offset + i;
+                let key = if idx < digit_keys.len() {
+                    KeyCode::Char(digit_keys[idx])
+                } else {
+                    KeyCode::Null
+                };
+                options.push(ModelOption {
+                    id: model_id.to_string(),
+                    label: Line::from(vec![
+                        Span::styled("[install] ", Style::default().fg(ratatui::style::Color::Yellow)),
+                        Span::raw(desc.to_string()),
+                    ]),
+                    key,
+                    is_installed: false,
+                });
+            }
+        }
+
+        Self {
+            server_label: server_label.to_string(),
+            options,
+            selected: 0,
+            done: false,
+            result: None,
+        }
+    }
+
+    pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<(String, bool)> {
+        if key.kind != KeyEventKind::Press {
+            return None;
+        }
+        let n = self.options.len();
+        match key {
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.result = Some(("__CANCELLED__".to_string(), false));
+                self.done = true;
+            }
+            _ if MOVE_LEFT_KEYS.is_pressed(key)
+                || matches!(key.code, KeyCode::Up | KeyCode::Char('k')) =>
+            {
+                if n > 0 {
+                    self.selected = (self.selected + n - 1) % n;
+                }
+            }
+            _ if MOVE_RIGHT_KEYS.is_pressed(key)
+                || matches!(key.code, KeyCode::Down | KeyCode::Char('j')) =>
+            {
+                if n > 0 {
+                    self.selected = (self.selected + 1) % n;
+                }
+            }
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => {
+                if n > 0 {
+                    let opt = &self.options[self.selected];
+                    self.result = Some((opt.id.clone(), !opt.is_installed));
+                    self.done = true;
+                }
+            }
+            KeyEvent { code, .. } => {
+                let norm = match code {
+                    KeyCode::Char(c) => KeyCode::Char(c.to_ascii_lowercase()),
+                    other => other,
+                };
+                if let Some(opt) = self.options.iter().find(|o| {
+                    matches!(o.key, KeyCode::Char(c) if KeyCode::Char(c.to_ascii_lowercase()) == norm)
+                }) {
+                    self.result = Some((opt.id.clone(), !opt.is_installed));
+                    self.done = true;
+                }
+            }
+        }
+        if self.done {
+            self.result.clone()
+        } else {
+            None
+        }
+    }
+}
+
+impl WidgetRef for &OssModelWidget {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        Clear.render(area, buf);
+        let mut column = FlexRenderable::new();
+        column.push(1, RenderableItem::Borrowed(&""));
+
+        let installed_count = self.options.iter().filter(|o| o.is_installed).count();
+        let title = if installed_count == 0 {
+            format!("No models installed on {}", self.server_label)
+        } else {
+            format!("Select a model — {}", self.server_label)
+        };
+        column.push(
+            0,
+            Paragraph::new(title.bold())
+                .wrap(Wrap { trim: false })
+                .inset(Insets::vh(0, 2)),
+        );
+
+        let subtitle = if installed_count == 0 {
+            "Choose a model to install:".to_string()
+        } else if self.options.len() > installed_count {
+            format!("{installed_count} installed  ·  press Enter or a digit to select, or [install] to download")
+        } else {
+            "↑/↓ to navigate".to_string()
+        };
+        column.push(
+            1,
+            Paragraph::new(Span::styled(subtitle, Style::default().add_modifier(Modifier::DIM)))
+                .wrap(Wrap { trim: false })
+                .inset(Insets::vh(0, 2)),
+        );
+
+        let labels: Vec<Line<'static>> = self.options.iter().map(|o| o.label.clone()).collect();
+        column.push(0, picker_option_list(labels, self.selected));
+
+        if let Some(opt) = self.options.get(self.selected) {
+            let note = if opt.is_installed {
+                format!("Model: {}", opt.id)
+            } else {
+                format!("Will run: ollama pull {}", opt.id)
+            };
+            column.push(
+                1,
+                Paragraph::new(Span::styled(note, Style::default().add_modifier(Modifier::DIM)))
+                    .wrap(Wrap { trim: false })
+                    .inset(Insets::vh(0, 2)),
+            );
+        }
+
+        column.push(
+            0,
+            Paragraph::new(Line::from(vec![
+                "↑/↓".bold(),
+                " choose · ".dim(),
+                key_hint::plain(KeyCode::Enter).into(),
+                " select · ".dim(),
+                key_hint::ctrl(KeyCode::Char('c')).into(),
+                " exit".dim(),
+            ]))
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(0, 2)),
+        );
+        column.push(1, RenderableItem::Borrowed(&""));
+
+        let panel = Rect {
+            height: column.desired_height(area.width).min(area.height),
+            ..area
+        };
+        render_menu_surface(panel, buf);
+        column.render(panel, buf);
+    }
+}
+
+/// Fetch the model list from a running server's `/v1/models` endpoint.
+async fn fetch_models_from_url(url: &str) -> Vec<String> {
+    #[allow(deprecated)]
+    let client = HttpClientBuilder::new().build_direct_with_custom_ca_fallback();
+    let resp = match client
+        .get(url)
+        .timeout(Duration::from_secs(4))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+    let text = match resp.text().await {
+        Ok(t) => t,
+        Err(_) => return vec![],
+    };
+    let v: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+    // OpenAI format: {"data": [{"id": "model-name"}]}
+    // Ollama /v1/models: {"data": [{"id": "..."}]}
+    // Ollama /api/tags:  {"models": [{"name": "..."}]}
+    let mut names: Vec<String> = Vec::new();
+    if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
+        for item in arr {
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                names.push(id.to_string());
+            }
+        }
+    } else if let Some(arr) = v.get("models").and_then(|d| d.as_array()) {
+        for item in arr {
+            if let Some(id) = item.get("name").and_then(|v| v.as_str()) {
+                names.push(id.to_string());
+            }
+        }
+    }
+    names
+}
+
+/// Query the selected server and decide how to proceed with model selection.
+pub(crate) async fn detect_oss_model(
+    provider_id: &str,
+    base_url: Option<&str>,
+) -> OssModelDetection {
+    let models_url = match base_url {
+        Some(u) => format!("{u}/models"),
+        None if provider_id == OLLAMA_OSS_PROVIDER_ID => {
+            format!("http://localhost:{DEFAULT_OLLAMA_PORT}/v1/models")
+        }
+        None => {
+            format!("http://localhost:{DEFAULT_LMSTUDIO_PORT}/v1/models")
+        }
+    };
+    let installed = fetch_models_from_url(&models_url).await;
+    match installed.len() {
+        1 => OssModelDetection::AutoSelected(installed.into_iter().next().unwrap()),
+        _ => OssModelDetection::NeedsSelection {
+            can_pull: provider_id == OLLAMA_OSS_PROVIDER_ID,
+            provider_id: provider_id.to_string(),
+            base_url: base_url.map(str::to_string),
+            installed,
+        },
+    }
+}
+
+/// Show the interactive model picker and return the chosen model.
+pub(crate) async fn select_oss_model(
+    server_label: &str,
+    installed: Vec<String>,
+    can_pull: bool,
+) -> io::Result<OssModelResult> {
+    let mut widget = OssModelWidget::new(server_label, &installed, can_pull);
+
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let result = (|| {
+        terminal.draw(|f| (&widget).render_ref(f.area(), f.buffer_mut()))?;
+        crate::tui::discard_pending_terminal_input()?;
+        loop {
+            if let Event::Key(key_event) = event::read()?
+                && let Some((model_id, needs_install)) = widget.handle_key_event(key_event)
+            {
+                break Ok(OssModelResult {
+                    model: model_id,
+                    needs_install,
+                });
+            }
+            terminal.draw(|f| (&widget).render_ref(f.area(), f.buffer_mut()))?;
+        }
+    })();
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    result
+}
+
+/// Pull an Ollama model (`ollama pull <model>`) and stream its progress lines
+/// to a minimal full-screen TUI, returning when the pull is complete.
+pub(crate) async fn pull_oss_model_with_tui(model: &str) -> io::Result<()> {
+    // Spawn `ollama pull <model>`; both stdout and stderr carry progress text.
+    let mut child = tokio::process::Command::new("ollama")
+        .args(["pull", model])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| io::Error::other(format!("could not run `ollama pull`: {e}")))?;
+
+    let stdout = child.stdout.take().expect("stdout pipe");
+    let stderr = child.stderr.take().expect("stderr pipe");
+
+    enable_raw_mode()?;
+    let mut out = io::stdout();
+    execute!(out, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(out);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut lines: Vec<String> = vec![format!("Pulling {model} …")];
+    let mut stdout_reader = tokio::io::BufReader::new(stdout).lines();
+    let mut stderr_reader = tokio::io::BufReader::new(stderr).lines();
+
+    let model_owned = model.to_string();
+    let result = async {
+        loop {
+            // Drain any new lines from subprocess output.
+            loop {
+                match stdout_reader.next_line().await {
+                    Ok(Some(line)) => {
+                        // Ollama emits JSON progress lines; show the "status" field if present.
+                        let display = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                            v.get("status")
+                                .and_then(|s| s.as_str())
+                                .map(str::to_string)
+                                .unwrap_or(line)
+                        } else {
+                            line
+                        };
+                        lines.push(display);
+                    }
+                    _ => break,
+                }
+            }
+            loop {
+                match stderr_reader.next_line().await {
+                    Ok(Some(line)) if !line.is_empty() => lines.push(line),
+                    _ => break,
+                }
+            }
+
+            // Redraw.
+            terminal.draw(|f| render_pull_screen(f, &model_owned, &lines))?;
+
+            // Check for Ctrl+C.
+            if crossterm::event::poll(Duration::from_millis(100))? {
+                if let Event::Key(k) = event::read()? {
+                    if k.code == KeyCode::Char('c')
+                        && k.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        let _ = child.kill().await;
+                        return Err(io::Error::other("cancelled"));
+                    }
+                }
+            }
+
+            // Check if process finished.
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    lines.push(if status.success() {
+                        format!("✓ {model_owned} ready")
+                    } else {
+                        format!("✗ ollama pull failed (exit {status})")
+                    });
+                    terminal.draw(|f| render_pull_screen(f, &model_owned, &lines))?;
+                    tokio::time::sleep(Duration::from_millis(800)).await;
+                    return if status.success() {
+                        Ok(())
+                    } else {
+                        Err(io::Error::other(format!("ollama pull failed: {status}")))
+                    };
+                }
+                Ok(None) => {}
+                Err(e) => return Err(e),
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+    .await;
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    result
+}
+
+fn render_pull_screen(f: &mut ratatui::Frame, model: &str, lines: &[String]) {
+    let area = f.area();
+    Clear.render(area, f.buffer_mut());
+    let mut column = FlexRenderable::new();
+    column.push(1, RenderableItem::Borrowed(&""));
+    column.push(
+        0,
+        Paragraph::new(format!("Installing  {model}").bold())
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(0, 2)),
+    );
+    column.push(1, RenderableItem::Borrowed(&""));
+
+    // Show last N lines of progress output.
+    let show: Vec<&str> = lines.iter().rev().take(12).rev().map(String::as_str).collect();
+    for line in show {
+        let owned = line.to_string();
+        column.push(
+            0,
+            Paragraph::new(Span::styled(owned, Style::default().add_modifier(Modifier::DIM)))
+                .wrap(Wrap { trim: false })
+                .inset(Insets::vh(0, 2)),
+        );
+    }
+    column.push(1, RenderableItem::Borrowed(&""));
+    column.push(
+        0,
+        Paragraph::new(Line::from(vec![
+            key_hint::ctrl(KeyCode::Char('c')).into(),
+            " cancel".dim(),
+        ]))
+        .wrap(Wrap { trim: false })
+        .inset(Insets::vh(0, 2)),
+    );
+    column.push(1, RenderableItem::Borrowed(&""));
+
+    let panel = Rect {
+        height: column.desired_height(area.width).min(area.height),
+        ..area
+    };
+    render_menu_surface(panel, f.buffer_mut());
+    column.render(panel, f.buffer_mut());
 }
 
 async fn check_port_status(client: &HttpClient, port: u16) -> io::Result<bool> {
