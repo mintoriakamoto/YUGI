@@ -468,6 +468,12 @@ pub(crate) async fn select_oss_provider(
 /// Scores are from model cards: ARC-C via Nightmedia zero-shot instruct, GPQA-Diamond as reported.
 /// "Heretic ARA" = Arbitrary-Rank Ablation; refusal drop verified per card.
 static PREFERRED_MODELS: &[(&str, &str)] = &[
+    // ── 4B class ──────────────────────────────────────────────────────────────
+    // Qwen3.5-4B fully abliterated (SicariusSicariiStuff, 2026-03)
+    (
+        "hf.co/SicariusSicariiStuff/Qwen3.5-4B_Abliterated_GGUF:Q4_K_M",
+        "SicariusSicariiStuff  Qwen3.5-4B abliterated  Q4_K_M  ~2.5 GB",
+    ),
     // ── 8B class ─────────────────────────────────────────────────────────────
     (
         "hf.co/DavidAU/Qwen3-8B-Hivemind-Instruct-Heretic-Abliterated-Uncensored-NEO-Imatrix-GGUF:Q4_K_M",
@@ -481,10 +487,32 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/SC117/QwenPaw-Flash-9B-heretic-GGUF:Q4_K_M",
         "SC117    Qwen3-9B QwenPaw-Flash heretic          Q4_K_M  ~6 GB  refusals:3/100",
     ),
+    // ── 12B class ────────────────────────────────────────────────────────────
+    // gemma-3-12B abliterated (grimjim, multimodal VLM, image+text)
+    (
+        "hf.co/grimjim/gemma-3-12b-it-abliterated-GGUF:Q4_K_M",
+        "grimjim  gemma-3-12B abliterated (VLM)  Q4_K_M  ~7 GB",
+    ),
+    // Violet_Twilight v0.2 — SLERP merge uncensored creative RP, 8.7K downloads (Epiculous)
+    (
+        "hf.co/Epiculous/Violet_Twilight-v0.2-GGUF:Q4_K_M",
+        "Epiculous  Violet_Twilight v0.2 uncensored RP  Q4_K_M  ~7 GB  8.7K downloads",
+    ),
     // ── 14B class ────────────────────────────────────────────────────────────
     (
         "hf.co/bartowski/mlabonne_Qwen3-14B-abliterated-GGUF:Q4_K_M",
         "bartowski/mlabonne  Qwen3-14B abliterated  Q4_K_M  ~9 GB",
+    ),
+    // ── 16B class (TheDrummer Rocinante-XL) ──────────────────────────────────
+    // Rocinante-XL-16B: creative storytelling / RP, 7K downloads, no-refusal by design
+    (
+        "hf.co/TheDrummer/Rocinante-XL-16B-v1-GGUF:Q4_K_M",
+        "TheDrummer  Rocinante-XL-16B v1 uncensored RP  Q4_K_M  ~10 GB  7K downloads",
+    ),
+    // DavidAU Qwen3-14B Cyber (TheDrummer-class quality)
+    (
+        "hf.co/DavidAU/Qwen3-14B-Cyber-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-14B Cyber uncensored  Q4_K_M  ~9 GB",
     ),
     // ── 27B class (dense, Heretic ARA uncensored) — verified model cards ─────
     // Qwen3.8-27B Turbo: ARC-C 0.735, ARC-E 0.882 (Nightmedia instruct), GPQA-D 89.2 (base),
@@ -533,6 +561,21 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/bartowski/mlabonne_gemma-3-27b-it-abliterated-GGUF:Q4_K_M",
         "bartowski/mlabonne gemma-3-27b abliterated  Q4_K_M  ~17 GB",
     ),
+    // Qwen3.5-27B Heretic Marvin V1 — uncensored DPO+SFT creative writing anti-rep (ddh0 quant)
+    (
+        "hf.co/ddh0/Qwen3.5-27B-Heretic-Marvin-V1-GGUF:Q4_K_M",
+        "ddh0  Qwen3.5-27B Heretic Marvin V1 (DPO uncensored)  Q4_K_M  ~16 GB",
+    ),
+    // Huihui-Qwen3.5-27B abliterated Athanorlite ORPO v2 (nbeerbower, multimodal VLM)
+    (
+        "hf.co/nbeerbower/Huihui-Qwen3.5-27B-abliterated-Athanorlite-ORPO-v2-GGUF:Q4_K_M",
+        "nbeerbower  Qwen3.5-27B abliterated Athanorlite ORPO v2 (VLM)  Q4_K_M  ~16 GB",
+    ),
+    // Effervescence-27B — creative RP uncensored instruct (Epiculous, 2-phase LoRA train)
+    (
+        "hf.co/Epiculous/Effervescence-27B-GGUF:Q4_K_M",
+        "Epiculous  Effervescence-27B uncensored RP  Q4_K_M  ~16 GB",
+    ),
     // ── 26B class (SC117 gemma-4-26B) ────────────────────────────────────────
     (
         "hf.co/SC117/gemma-4-26B-A4B-it-qat-heretic-GGUF:Q4_K_M",
@@ -549,10 +592,21 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/mradermacher/LFM2.5-24B-A2B-uncensored2-i1-GGUF:Q4_K_M",
         "mradermacher LFM2.5-24B-A2B uncensored2 imatrix  Q4_K_M  ~8 GB  [new 2026-10-23]",
     ),
-    // ── 31B class (DavidAU gemma-4-31B) ─────────────────────────────────────
+    // ── 31B class ────────────────────────────────────────────────────────────
+    // DavidAU gemma-4-31B Mystery Heretic (thinking mode, uncensored)
     (
         "hf.co/DavidAU/gemma-4-31B-it-Mystery-Fine-Tune-HERETIC-UNCENSORED-Thinking-Instruct-GGUF:Q4_K_M",
         "DavidAU  gemma-4-31B Heretic Mystery (thinking)  Q4_K_M  ~19 GB",
+    ),
+    // TheDrummer Artemis-31B v1.1 — gemma-4-31B base, creative uncensored, 3.7K downloads
+    (
+        "hf.co/TheDrummer/Artemis-31B-v1.1-GGUF:Q4_K_M",
+        "TheDrummer  Artemis-31B v1.1 (gemma-4 base) uncensored  Q4_K_M  ~19 GB  3.7K downloads",
+    ),
+    // TheDrummer Skyfall-31B v4.2 — Magistral-Small-2509 base, 7K downloads
+    (
+        "hf.co/TheDrummer/Skyfall-31B-v4.2-GGUF:Q4_K_M",
+        "TheDrummer  Skyfall-31B v4.2 (Magistral base) uncensored  Q4_K_M  ~19 GB  7K downloads",
     ),
     // ── 34B MoE class (DavidAU Qwen3-48B-A4B Savant, effective ~34B) ─────────
     (
@@ -587,6 +641,12 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/SC117/occamy-1.0-abliterated-FIT-GGUF:Q4_K_M",
         "SC117    occamy-1.0 35B abliterated FIT  Q4_K_M  ~21 GB",
+    ),
+    // ── 49B class (TheDrummer Valkyrie) ──────────────────────────────────────
+    // Valkyrie-49B v2.1 — NVIDIA Nemotron-Super-49B base, creative uncensored, 1.1K downloads
+    (
+        "hf.co/TheDrummer/Valkyrie-49B-v2.1-GGUF:Q4_K_M",
+        "TheDrummer  Valkyrie-49B v2.1 (Nemotron-Super base) uncensored  Q4_K_M  ~29 GB  1K downloads",
     ),
     // ── 40B class (expanded from Qwen3.6-27B, 96 layers) ────────────────────
     // Qwen3.6-40B Deckard: ARC-C 0.651 (40B), 2M+ downloads, Claude 4.6 Opus distill,
@@ -630,6 +690,11 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/bartowski/dolphin-2.9-llama3-70b-GGUF:Q4_K_M",
         "bartowski dolphin-2.9-llama3-70b uncensored  Q4_K_M  ~43 GB",
+    ),
+    // TheDrummer Anubis-70B v1.2 — Llama-3.3-70B base, creative uncensored, 2.7K downloads
+    (
+        "hf.co/TheDrummer/Anubis-70B-v1.2-GGUF:Q4_K_M",
+        "TheDrummer  Anubis-70B v1.2 (Llama-3.3 base) uncensored  Q4_K_M  ~43 GB  2.7K downloads",
     ),
     // ── 74B MoE class (NVIDIA Nemotron 3.5 Bolt) ─────────────────────────────
     // 74B total / 9B active, Mamba-2–Transformer hybrid LatentMoE, GPQA-D 86.43

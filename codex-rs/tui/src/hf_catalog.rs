@@ -16,19 +16,41 @@ use serde::Serialize;
 const HF_API: &str = "https://huggingface.co/api";
 /// Authors whose models we scan (abliterated/uncensored GGUF series).
 const CATALOG_AUTHORS: &[&str] = &[
+    // — Primary abliteration / uncensoring authors ——————————————————————————
     "DavidAU",
     "SC117",
-    "bartowski",
-    "cognitivecomputations",
     "mlabonne",
-    "mradermacher",
-    "DevQuasar",
     "huihui-ai",
+    "failspy",
     "Orenguteng",
     "UnfilteredAI",
-    "failspy",
+    // — GGUF quantization specialists ——————————————————————————————————————
+    "bartowski",
+    "mradermacher",
+    "DevQuasar",
     "maddes8cht",
     "QuantFactory",
+    "SicariusSicariiStuff",
+    "RichardErkhov",
+    "casperhansen",
+    // — Creative / roleplay fine-tuners (uncensored) ————————————————————————
+    "TheDrummer",          // Artemis/Skyfall/Anubis/Valkyrie/Rocinante series
+    "Epiculous",           // Violet_Twilight/Effervescence
+    "sophosympatheia",     // Midnight-Miqu series
+    "ddh0",                // Qwen3.5-27B Heretic Marvin; DeepSeek uncensored
+    "nbeerbower",          // Huihui-Qwen3.5-27B Athanorlite ORPO abliterated
+    "grimjim",             // gemma-3 abliterated
+    "cognitivecomputations", // dolphin series
+    // — Other active abliteration authors ——————————————————————————————————
+    "Nitral-AI",
+    "PocketDoc",
+    "Undi95",
+    "MaziyarPanahi",
+    "LoneStriker",
+    "kalomaze",
+    "vihangd",
+    "smirki",
+    "h2oai",
 ];
 const CACHE_PATH_SUFFIX: &str = ".config/yugi/model_catalog.json";
 /// How many hours before the cache is considered stale.
