@@ -58,6 +58,10 @@ const CATALOG_AUTHORS: &[&str] = &[
     "0bserverx",             // RVN triple-ARA abliteration (KL:0.0085), 1M+ downloads
     "philbert440",           // Qwen3.8-27B cyber-specialized, 507K downloads
     "dima6312",              // Flint-40B abliterix+Optuna, MITRE refusals 0%
+    // — HauhauCS family (0/465 refusals, FastMTP, K_P quants) ─────────────────
+    "HauhauCS",              // Aggressive/Balanced series: Gemma-4E4B, 9B/12B/26B/27B/35B/122B
+    "JonathanColetti",       // Qwen3.8-27B-Uncensored heretic (KL:0.0141, 2.4M downloads)
+    "LuffyTheFox",           // Genesis noise-repair method (Marchenko-Pastur) on HauhauCS base
 ];
 const CACHE_PATH_SUFFIX: &str = ".config/yugi/model_catalog.json";
 /// How many hours before the cache is considered stale.

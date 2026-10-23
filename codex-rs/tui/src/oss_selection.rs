@@ -474,6 +474,11 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/SicariusSicariiStuff/Qwen3.5-4B_Abliterated_GGUF:Q4_K_M",
         "SicariusSicariiStuff  Qwen3.5-4B abliterated  Q4_K_M  ~2.5 GB",
     ),
+    // HauhauCS Gemma-4-E4B Aggressive — VLM, MTP, 0/465 refusals; 920K downloads
+    (
+        "hf.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "HauhauCS  Gemma-4-E4B Uncensored Aggressive (VLM+MTP)  Q4_K_M  ~5 GB  0/465 refusals  920K downloads",
+    ),
     // ── 8B class ─────────────────────────────────────────────────────────────
     (
         "hf.co/DavidAU/Qwen3-8B-Hivemind-Instruct-Heretic-Abliterated-Uncensored-NEO-Imatrix-GGUF:Q4_K_M",
@@ -498,6 +503,22 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/mradermacher/Huihui-Qwen3-VL-8B-Instruct-abliterated-GGUF:Q4_K_M",
         "mradermacher/huihui-ai  Qwen3-VL-8B abliterated (VLM)  Q4_K_M  ~5 GB",
     ),
+    // mradermacher Qwen3-VL-8B-Instruct abliterated (mradermacher's own abliteration, not Huihui)
+    //   644K downloads, VLM, apache-2.0; distinct from Huihui-Qwen3-VL-8B already in catalog
+    (
+        "hf.co/mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF:Q4_K_M",
+        "mradermacher  Qwen3-VL-8B abliterated (VLM)  Q4_K_M  ~5.1 GB  644K downloads",
+    ),
+    // HauhauCS Qwen3.5-9B Aggressive — 0/465 refusals, K_P quants; 651K downloads
+    (
+        "hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "HauhauCS  Qwen3.5-9B Uncensored Aggressive  Q4_K_M  ~5.3 GB  0/465 refusals  651K downloads",
+    ),
+    // mradermacher Ornith-1.5-9B-uncensored — ZeroFuse abliterated VLM; 1.67M downloads
+    (
+        "hf.co/mradermacher/Ornith-1.5-9B-uncensored-GGUF:Q4_K_M",
+        "mradermacher  Ornith-1.5-9B uncensored (ZeroFuse VLM)  Q4_K_M  ~5.7 GB  1.67M downloads",
+    ),
     // ── 12B class ────────────────────────────────────────────────────────────
     // gemma-3-12B abliterated (grimjim, multimodal VLM, image+text)
     (
@@ -514,6 +535,12 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/mradermacher/Mistral-NeMo-12B-Abliterated-i1-GGUF:Q4_K_M",
         "mradermacher  Mistral-NeMo-12B abliterated imatrix  Q4_K_M  ~7 GB  3.2K downloads",
+    ),
+    // HauhauCS Gemma4-12B QAT Balanced — VLM, MTP ~35% faster, 0/465 refusals; 831K downloads
+    //   QAT weights → Q4_K_M ~6.9 GB stays close to full-precision quality
+    (
+        "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
+        "HauhauCS  Gemma4-12B QAT Balanced (VLM+MTP ~35% faster)  Q4_K_M  ~6.9 GB  0/465 refusals  831K downloads",
     ),
     // ── 14B class ────────────────────────────────────────────────────────────
     (
@@ -650,10 +677,28 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/philbert440/Qwen3.8-27B-Uncensored-Cyber-GGUF:Q4_K_M",
         "philbert440  Qwen3.8-27B Uncensored Cyber  Q4_K_M  ~16 GB  cyber-open:100/100 gsm8k:0.80  507K downloads",
     ),
+    // JonathanColetti Qwen3.8-27B-Uncensored — heretic (p-e-w KL-minimized)
+    //   KL:0.0141±0.0025, 96.72% same top token; VLM (mmproj), MTP; ~16.8 GB; 2.4M downloads
+    (
+        "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:Q4_K_M",
+        "JonathanColetti  Qwen3.8-27B Uncensored Heretic  Q4_K_M  ~16.8 GB  KL:0.0141 top-tok:96.72%  2.4M downloads",
+    ),
+    // HauhauCS Qwen3.8-27B Aggressive MTP — 0/465 refusals, FastMTP 3.02x TG speedup
+    //   K_P quants; ~16 GB; 2.27M downloads
+    (
+        "hf.co/HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF:Q4_K_M",
+        "HauhauCS  Qwen3.8-27B Aggressive (FastMTP 3.02x TG)  Q4_K_M  ~16 GB  0/465 refusals  2.27M downloads",
+    ),
     // ── 26B class (SC117 gemma-4-26B) ────────────────────────────────────────
     (
         "hf.co/SC117/gemma-4-26B-A4B-it-qat-heretic-GGUF:Q4_K_M",
         "SC117    gemma-4-26B heretic QAT  Q4_K_M  ~16 GB  refusals:13/100 KL:0.066  28K downloads",
+    ),
+    // HauhauCS Gemma4-26B QAT Balanced MTP — VLM, MTP ~35% faster, 0/465 refusals; 143K downloads
+    //   QAT weights, Q4_K_M 16.8 GB; mmproj vision tower included
+    (
+        "hf.co/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP:Q4_K_M",
+        "HauhauCS  Gemma4-26B QAT Balanced (VLM+MTP ~35% faster)  Q4_K_M  ~16.8 GB  0/465 refusals  143K downloads",
     ),
     // ── 24B class (LFM2.5 MoE uncensored, mradermacher, 2026-10-23) ──────────
     // LFM2.5-24B-A2B-uncensored2: 24B total / 2B active MoE, heretic-tagged uncensored
@@ -737,6 +782,18 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/huihui-ai/Huihui-CyberStrike-OffSec-35B-abliterated-GGUF:Q4_K",
         "huihui-ai  CyberStrike-OffSec-35B abliterated (pentest)  Q4_K  ~21 GB  65K downloads",
+    ),
+    // HauhauCS Qwen3.6-35B-A3B Aggressive — 0/465 refusals; 35B total / ~3B active
+    //   256 experts / 8 routed; Q4_K_M ~21 GB; 907K downloads
+    (
+        "hf.co/HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "HauhauCS  Qwen3.6-35B-A3B Aggressive (MoE 256exp/8act)  Q4_K_M  ~21 GB  0/465 refusals  907K downloads",
+    ),
+    // LuffyTheFox Qwen3.6-35B-A3B Genesis-Hermes — Marchenko-Pastur noise repair
+    //   552K downloads; Genesis method + Hermes function-calling on HauhauCS uncensored base
+    (
+        "hf.co/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Hermes-GGUF:Q4_K_M",
+        "LuffyTheFox  Qwen3.6-35B-A3B Genesis-Hermes (noise repair+fn-calling MoE)  Q4_K_M  ~21 GB  552K downloads",
     ),
     // ── 49B class (TheDrummer Valkyrie) ──────────────────────────────────────
     // Valkyrie-49B v2.1 — NVIDIA Nemotron-Super-49B base, creative uncensored, 1.1K downloads
@@ -828,6 +885,12 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/mradermacher/Qwen3.5-122B-A10B-abliterated-GGUF:Q4_K_M",
         "mradermacher Qwen3.5-122B-A10B abliterated (pentest MoE)  Q4_K_M  ~74 GB  [new 2026-10-23]",
+    ),
+    // HauhauCS Qwen3.5-122B-A10B Aggressive — 0/465 refusals, K_P quants; 382K downloads
+    //   Q4_K_M 74 GB, VLM (mmproj included); MoE 122B / 10B active
+    (
+        "hf.co/HauhauCS/Qwen3.5-122B-A10B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "HauhauCS  Qwen3.5-122B-A10B Aggressive (MoE VLM K_P quants)  Q4_K_M  ~74 GB  0/465 refusals  382K downloads",
     ),
     // ── 177B class (GSQ-RCO sharded, requires Strata engine) ─────────────────
     // Qwen3.8 Flash-Next: 125B LM + 51B n-gram embedding + 4B MTP = ~177B
