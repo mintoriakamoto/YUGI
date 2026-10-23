@@ -544,6 +544,7 @@ pub(crate) enum OssModelDetection {
         installed: Vec<String>,
         can_pull: bool,
         provider_id: String,
+        #[allow(dead_code)]
         base_url: Option<String>,
     },
 }
@@ -865,6 +866,13 @@ pub(crate) async fn detect_oss_model(
         }
     };
     let installed = fetch_models_from_url(&models_url).await;
+
+    // Kick off a background catalog refresh so the next picker open has fresh
+    // HuggingFace scores.  Only when cache is absent or stale.
+    if hf_catalog::load_catalog().is_none() {
+        spawn_catalog_refresh();
+    }
+
     match installed.len() {
         1 => OssModelDetection::AutoSelected(installed.into_iter().next().unwrap()),
         _ => OssModelDetection::NeedsSelection {
@@ -874,6 +882,18 @@ pub(crate) async fn detect_oss_model(
             installed,
         },
     }
+}
+
+/// Spawn a background task to refresh the HuggingFace model catalog and save
+/// it to the disk cache.  The result is available on the next picker open.
+/// Silently ignores failures — the picker falls back to PREFERRED_MODELS.
+pub(crate) fn spawn_catalog_refresh() {
+    tokio::spawn(async {
+        let entries = hf_catalog::refresh_catalog().await;
+        if !entries.is_empty() {
+            hf_catalog::save_catalog(&entries);
+        }
+    });
 }
 
 /// Show the interactive model picker and return the chosen model.
