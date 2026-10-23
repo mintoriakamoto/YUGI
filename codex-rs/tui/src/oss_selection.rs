@@ -4,6 +4,8 @@
 use std::io;
 use std::process::Stdio;
 
+use crate::hf_catalog;
+
 use futures::future::join_all;
 use tokio::io::AsyncBufReadExt as _;
 
@@ -461,59 +463,76 @@ pub(crate) async fn select_oss_provider(
 // Model discovery, picker and auto-install
 // ---------------------------------------------------------------------------
 
-/// Curated HuggingFace GGUF models — abliterated / uncensored, high SWE-bench,
-/// Cyber variants, and 27B+. All use the Ollama `hf.co/<author>/<repo>` syntax.
+/// Curated HuggingFace GGUF models — abliterated/uncensored (Heretic method), high benchmarks.
+/// All use the Ollama `hf.co/<author>/<repo>:<quant>` syntax so `ollama pull` fetches them directly.
+/// Scores are from model cards: ARC-C via Nightmedia zero-shot instruct, GPQA-Diamond as reported.
+/// "Heretic ARA" = Arbitrary-Rank Ablation; refusal drop verified per card.
 static PREFERRED_MODELS: &[(&str, &str)] = &[
     // ── 8B class ─────────────────────────────────────────────────────────────
     (
-        "hf.co/DavidAU/Qwen3-8B-Drowzee-GGUF:Q4_K_M",
-        "DavidAU  Qwen3-8B Drowzee (abliterated) Q4   5 GB",
+        "hf.co/DavidAU/Qwen3-8B-Hivemind-Instruct-Heretic-Abliterated-Uncensored-NEO-Imatrix-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-8B Hivemind Heretic abliterated  Q4_K_M  ~5 GB  [ARC-C UNKNOWN]",
     ),
     (
-        "hf.co/sc117/Qwen3-8B-ablit-GGUF:Q4_K_M",
-        "Sc117    Qwen3-8B abliterated             Q4   5 GB",
+        "hf.co/SC117/QwenPaw-Flash-9B-heretic-GGUF:Q4_K_M",
+        "SC117    Qwen3-9B QwenPaw-Flash heretic          Q4_K_M  ~6 GB",
     ),
+    // ── 27B class (dense, Heretic ARA uncensored) — verified model cards ─────
+    // Qwen3.8-27B Turbo: ARC-C 0.735, ARC-E 0.882 (Nightmedia instruct), GPQA-D 89.2 (base),
+    //   SWE-bench Pro 61.7 (base); Heretic KL 0.0535, refusals 0/100; hybrid DeltaNet+Attn
     (
-        "hf.co/DavidAU/Qwen3-8B-Cyber-GGUF:Q4_K_M",
-        "DavidAU  Qwen3-8B Cyber (uncensored)      Q4   5 GB",
+        "hf.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B TURBO Heretic  Q4_K_M  ~16 GB  ARC-C:0.735 GPQA:89.2 refusals:0/100",
     ),
-    // ── 12–14B class ─────────────────────────────────────────────────────────
+    // Qwen3.6-27B Fable Fusion: ARC-C 0.711, ARC-E 0.879; Heretic KL 0.0469, refusals 4/100;
+    //   MMLU-Redux 93.5, SWE-bench Verified 77.2 (base Qwen3.6-27B); 4M+ total downloads
     (
-        "hf.co/DavidAU/Drowzee-Gemma-3-12B-Abliterated-GGUF:Q4_K_M",
-        "DavidAU  Drowzee Gemma3-12B abliterated   Q4   8 GB",
+        "hf.co/DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-27B Fable-Fusion Heretic  Q4_K_M  ~16 GB  ARC-C:0.711 MMLU:93.5 refusals:4/100",
     ),
+    // Qwen3.6-27B NEO-CODE fine-tune: coding-focused, uncensored heretic
     (
-        "hf.co/DavidAU/Qwen3-14B-Cyber-GGUF:Q4_K_M",
-        "DavidAU  Qwen3-14B Cyber                  Q4  10 GB",
+        "hf.co/DavidAU/Qwen3.6-27B-Heretic-Uncensored-FINETUNE-NEO-CODE-Di-IMatrix-MAX-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-27B NEO-CODE Heretic (coder)  Q4_K_M  ~16 GB",
     ),
-    // ── 27–32B class (high SWE-bench / novel) ────────────────────────────────
+    // SC117 Qwen3.8-27B uncensored FIT (SC117's abliteration method)
     (
-        "hf.co/DavidAU/Qwen3-Crack-27B-Instruct-GGUF:Q4_K_M",
-        "DavidAU  Crack-27B (SWE-score)            Q4  16 GB",
+        "hf.co/SC117/Qwen3.8-27B-Uncensored-FIT-GGUF:Q4_K_M",
+        "SC117    Qwen3.8-27B Uncensored FIT  Q4_K_M  ~16 GB",
     ),
+    // ── 35B class (SC117 occamy) ──────────────────────────────────────────────
     (
-        "hf.co/DavidAU/Qwen3-Crack-32B-Instruct-GGUF:Q4_K_M",
-        "DavidAU  Crack-32B uncensored             Q4  20 GB",
+        "hf.co/SC117/occamy-1.0-abliterated-FIT-GGUF:Q4_K_M",
+        "SC117    occamy-1.0 35B abliterated FIT  Q4_K_M  ~21 GB",
     ),
+    // ── 40B class (expanded from Qwen3.6-27B, 96 layers) ────────────────────
+    // Qwen3.6-40B Deckard: ARC-C 0.651 (40B), 2M+ downloads, Claude 4.6 Opus distill,
+    //   variable-length reasoning, 1,275 tensors; ~50% more layers than 27B base
     (
-        "hf.co/DavidAU/Qwen3-32B-Cyber-GGUF:Q4_K_M",
-        "DavidAU  Qwen3-32B Cyber                  Q4  20 GB",
+        "hf.co/DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-40B Deckard Heretic (thinking)  Q4_K_M  ~24 GB  ARC-C:0.651 2M+dl",
     ),
-    // ── 72B class ────────────────────────────────────────────────────────────
+    // Qwen3.6-40B Grand Intelligence Fable Fusion
     (
-        "hf.co/DavidAU/Qwen3-72B-Cyber-GGUF:Q4_K_M",
-        "DavidAU  Qwen3-72B Cyber                  Q4  43 GB",
+        "hf.co/DavidAU/Qwen3.6-40B-Grand-Intelligence-Fable-Fusion-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-40B Grand-Intelligence Heretic  Q4_K_M  ~24 GB",
     ),
-    // ── 177B class (sharded GSQ-RCO, requires Strata engine) ─────────────────
-    // DavidAU Qwen3.8-Flash-Next series: 125B language + 51B embedding + 4B MTP
-    // Run with Strata: github.com/Niko1221/Strata  (port 8080, needs 32 GB+ RAM+VRAM)
+    // ── 177B class (GSQ-RCO sharded, requires Strata engine) ─────────────────
+    // Qwen3.8 Flash-Next: 125B LM + 51B n-gram embedding + 4B MTP = ~177B
+    // GPQA-Diamond 92.93 (IQ3_S measured), SC117 abliteration of GSQ-RCO quant
+    // IQ3_S = ~84 GB; needs Strata engine: github.com/Niko1221/Strata (port 8080, 64 GB+ RAM+VRAM)
     (
         "hf.co/DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF:IQ3_S",
-        "DavidAU  177B Flash-Next Abliterated GSQ-RCO IQ3_S  ~84 GB  [Strata]",
+        "DavidAU  177B Flash-Next Abliterated GSQ-RCO  IQ3_S  ~84 GB  GPQA:92.93  [Strata]",
+    ),
+    // SC117 Swift-1.5 — newest SC117 abliteration of Flash-Next GSQ-RCO (updated 14 days ago)
+    (
+        "hf.co/SC117/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF:IQ3_S",
+        "SC117    177B Swift-1.5 Flash-Next abliterated   IQ3_S  ~84 GB  [Strata]",
     ),
     (
         "hf.co/DavidAU/Qwen3.8-Flash-Next-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF:IQ3_S",
-        "DavidAU  177B Flash-Next Turbo GSQ-RCO         IQ3_S  ~84 GB  [Strata]",
+        "DavidAU  177B Flash-Next Turbo GSQ-RCO (base)   IQ3_S  ~84 GB  [Strata]",
     ),
 ];
 
@@ -541,6 +560,8 @@ struct ModelOption {
     label: Line<'static>,
     key: KeyCode,
     is_installed: bool,
+    /// Optional score summary line shown in the detail pane (from HF catalog).
+    score_hint: String,
 }
 
 pub(crate) struct OssModelWidget {
@@ -567,13 +588,28 @@ impl OssModelWidget {
                 label: Line::from(Span::raw(id.clone())),
                 key,
                 is_installed: true,
+                score_hint: String::new(),
             });
         }
 
         if can_pull {
             let offset = installed.len();
-            for (i, (model_id, desc)) in PREFERRED_MODELS.iter().enumerate() {
-                let already = installed.iter().any(|m| m.as_str() == *model_id);
+            // Prefer live catalog (scored + fresher) over the static fallback list.
+            let live_catalog = hf_catalog::load_catalog();
+            let catalog_pairs: Vec<(String, String, String)> = if let Some(ref entries) = live_catalog {
+                entries
+                    .iter()
+                    .map(|e| (e.pull_id.clone(), e.display.clone(), e.benchmarks.score_summary()))
+                    .collect()
+            } else {
+                PREFERRED_MODELS
+                    .iter()
+                    .map(|(id, disp)| (id.to_string(), disp.to_string(), String::new()))
+                    .collect()
+            };
+
+            for (i, (model_id, desc, score_hint)) in catalog_pairs.iter().enumerate() {
+                let already = installed.iter().any(|m| m.as_str() == model_id.as_str());
                 if already {
                     continue;
                 }
@@ -591,6 +627,7 @@ impl OssModelWidget {
                     ]),
                     key,
                     is_installed: false,
+                    score_hint: score_hint.clone(),
                 });
             }
         }
@@ -711,6 +748,17 @@ impl WidgetRef for &OssModelWidget {
                     .wrap(Wrap { trim: false })
                     .inset(Insets::vh(0, 2)),
             );
+            if !opt.score_hint.is_empty() {
+                column.push(
+                    0,
+                    Paragraph::new(Span::styled(
+                        opt.score_hint.clone(),
+                        Style::default().fg(ratatui::style::Color::Cyan),
+                    ))
+                    .wrap(Wrap { trim: false })
+                    .inset(Insets::vh(0, 2)),
+                );
+            }
             if is_strata_model(&opt.id) {
                 column.push(
                     0,
