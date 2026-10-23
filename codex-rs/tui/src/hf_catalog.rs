@@ -51,6 +51,9 @@ const CATALOG_AUTHORS: &[&str] = &[
     "vihangd",
     "smirki",
     "h2oai",
+    // — CRACK / multi-tier abliteration specialists ————————————————————————
+    "dealignai",             // CRACK series: Bonsai-27B ternary, MiniCPM-35B, Bolt-74B
+    "BoldingBuilds",         // in-place abliteration on NVIDIA quantized GGUFs
 ];
 const CACHE_PATH_SUFFIX: &str = ".config/yugi/model_catalog.json";
 /// How many hours before the cache is considered stale.

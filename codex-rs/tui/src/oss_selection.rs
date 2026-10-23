@@ -498,6 +498,12 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/Epiculous/Violet_Twilight-v0.2-GGUF:Q4_K_M",
         "Epiculous  Violet_Twilight v0.2 uncensored RP  Q4_K_M  ~7 GB  8.7K downloads",
     ),
+    // Mistral NeMo 12B abliterated — mradermacher imatrix quant of DuoNeural abliteration
+    //   3.2K downloads; "Nemo" 12B abliterated (mechanistic-interpretability removal)
+    (
+        "hf.co/mradermacher/Mistral-NeMo-12B-Abliterated-i1-GGUF:Q4_K_M",
+        "mradermacher  Mistral-NeMo-12B abliterated imatrix  Q4_K_M  ~7 GB  3.2K downloads",
+    ),
     // ── 14B class ────────────────────────────────────────────────────────────
     (
         "hf.co/bartowski/mlabonne_Qwen3-14B-abliterated-GGUF:Q4_K_M",
@@ -513,6 +519,25 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/DavidAU/Qwen3-14B-Cyber-GGUF:Q4_K_M",
         "DavidAU  Qwen3-14B Cyber uncensored  Q4_K_M  ~9 GB",
+    ),
+    // ── 22B class ────────────────────────────────────────────────────────────
+    // Codestral-22B abliterated v3 (failspy/bartowski) — 22B coding model, 9.2K downloads
+    //   Q4_K_M ~13 GB; failspy abliteration v3; no benchmark scores in README
+    (
+        "hf.co/bartowski/Codestral-22B-v0.1-abliterated-v3-GGUF:Q4_K_M",
+        "bartowski  Codestral-22B v0.1 abliterated-v3 (coding)  Q4_K_M  ~13 GB  9.2K downloads",
+    ),
+    // DavidAU Qwen3-22B-A3B-The-Harley-Quinn-PUDDIN — 22B MoE (64 experts, 8 active, ~3B active)
+    //   mradermacher imatrix quant; uncensored/abliterated; creative RP + reasoning
+    (
+        "hf.co/mradermacher/Qwen3-22B-A3B-The-Harley-Quinn-PUDDIN-Abliterated-Uncensored-i1-GGUF:Q4_K_M",
+        "mradermacher  Qwen3-22B-A3B Harley-Quinn PUDDIN (MoE 64exp/8act)  Q4_K_M  ~8 GB",
+    ),
+    // DavidAU Qwen3-22B Xiaolong-Josiefied-Omega-Directive — 62-layer merge of 3×14B models
+    //   1.4K downloads; reasoning on/off; uncensored/abliterated
+    (
+        "hf.co/DavidAU/Qwen3-The-Xiaolong-Josiefied-Omega-Directive-22B-uncensored-abliterated-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-22B Xiaolong-Josiefied-Omega (62L merge)  Q4_K_M  ~13 GB  uncensored",
     ),
     // ── 27B class (dense, Heretic ARA uncensored) — verified model cards ─────
     // Qwen3.8-27B Turbo: ARC-C 0.735, ARC-E 0.882 (Nightmedia instruct), GPQA-D 89.2 (base),
@@ -634,6 +659,22 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/TheDrummer/Skyfall-31B-v4.2-GGUF:Q4_K_M",
         "TheDrummer  Skyfall-31B v4.2 (Magistral base) uncensored  Q4_K_M  ~19 GB  7K downloads",
     ),
+    // ── 27B CRACK (dealignai) ─────────────────────────────────────────────────
+    // Bonsai-2-27B Ternary CRACK — HarmBench-320: 0/320 refusals (0.00%), MMLU 39.91%
+    //   7.21 GB ternary PQ2_0 (2.13 bpw), vision-capable (VLM), 57K downloads
+    //   dealignai weight-level abliteration, all reasoning modes (off/low/xhigh) verified
+    (
+        "hf.co/dealignai/Bonsai-2-27B-Ternary-CRACK-GGUF:Q4_K_M",
+        "dealignai  Bonsai-2-27B Ternary CRACK (VLM) ~7 GB  HB-320:0/320 MMLU:39.91%  57K downloads",
+    ),
+    // ── 35B CRACK (dealignai MiniCPM-V-4.7) ──────────────────────────────────
+    // MiniCPM-V-4.7-35B-A3B CRACK — HB-240: 240/240 comply (100%), MMLU Q4_K_M 75.5% (+0.5pp)
+    //   ~22.6 GB, 35B-A3B MoE (Qwen3.5-moe hybrid GatedDeltaNet), multimodal VLM, 34K downloads
+    //   dealignai 3-tier abliteration (SSM + attention + router paths)
+    (
+        "hf.co/dealignai/MiniCPM-V-4.7-35B-A3B-CRACK-GGUF:Q4_K_M",
+        "dealignai  MiniCPM-V-4.7-35B-A3B CRACK (MoE VLM)  Q4_K_M  ~22 GB  HB-240:100% MMLU:75.5%  34K downloads",
+    ),
     // ── 34B MoE class (DavidAU Qwen3-48B-A4B Savant, effective ~34B) ─────────
     (
         "hf.co/DavidAU/Qwen3-48B-A4B-Savant-Commander-Distill-12X-Closed-Open-Heretic-Uncensored-GGUF:Q4_K_M",
@@ -723,10 +764,23 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "TheDrummer  Anubis-70B v1.2 (Llama-3.3 base) uncensored  Q4_K_M  ~43 GB  2.7K downloads",
     ),
     // ── 74B MoE class (NVIDIA Nemotron 3.5 Bolt) ─────────────────────────────
-    // 74B total / 9B active, Mamba-2–Transformer hybrid LatentMoE, GPQA-D 86.43
+    // Bolt architecture: NemotronH-Puzzle, 88 blocks (40 Mamba2 + 40 latent-MoE + 8 full-attn)
+    //   74B total / 9B active, C-RADIO-v4-H vision tower (multimodal), GPQA-D 86.43
     (
         "hf.co/DavidAU/NVIDIA-Nemotron-3.5-Bolt-Turbo-Brilliance-50x-74B-A9B-24GB-GGUF:Q4_K_M",
         "DavidAU  Nemotron-3.5-Bolt 74B-A9B Turbo (LatentMoE)  Q4_K_M  ~24 GB  GPQA:86.43",
+    ),
+    // BoldingBuilds Bolt abliterated — abliteration applied to NVIDIA's own 24GB GGUF in-place
+    //   154/154 harmful prompts answered; 100 tensors edited (attn+MoE+Mamba); 4.4K downloads
+    (
+        "hf.co/BoldingBuilds/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-Abliterated-24GB-GGUF:Q4_K_M",
+        "BoldingBuilds  Bolt 74B-A9B abliterated (VLM LatentMoE)  22 GB  154/154 comply  4.4K downloads",
+    ),
+    // dealignai Bolt CRACK — CRACK methodology (3-tier abliteration) on Bolt, incl. imatrix
+    //   NemotronH 22 GB, speculative drafter (LiLiCorr) + mmproj included; 2.9K downloads
+    (
+        "hf.co/dealignai/Nemotron-3.5-Bolt-74B-A9B-CRACK-24GB-GGUF:Q4_K_M",
+        "dealignai  Bolt 74B-A9B CRACK (VLM LatentMoE imatrix)  ~22 GB  2.9K downloads",
     ),
     // ── 122B MoE class (SC117, Qwen3.5-122B-A10B) ────────────────────────────
     (
