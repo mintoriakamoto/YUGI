@@ -487,6 +487,17 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/SC117/QwenPaw-Flash-9B-heretic-GGUF:Q4_K_M",
         "SC117    Qwen3-9B QwenPaw-Flash heretic          Q4_K_M  ~6 GB  refusals:3/100",
     ),
+    // DavidAU Qwen3.5-9B Defiant Fable: ARC-C 0.640 in 4bit+8bit, beats 7/7 benchmarks vs 27B
+    //   uncensored Heretic, NEO-IMATRIX MAX MTP, VLM (vision); 1.83M+ downloads
+    (
+        "hf.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.5-9B Defiant Fable Heretic  Q4_K_M  ~6 GB  ARC-C:0.640 beats 27B models  1.83M+ downloads",
+    ),
+    // mradermacher / huihui-ai Qwen3-VL-8B abliterated — VLM (image+text), apache-2.0
+    (
+        "hf.co/mradermacher/Huihui-Qwen3-VL-8B-Instruct-abliterated-GGUF:Q4_K_M",
+        "mradermacher/huihui-ai  Qwen3-VL-8B abliterated (VLM)  Q4_K_M  ~5 GB",
+    ),
     // ── 12B class ────────────────────────────────────────────────────────────
     // gemma-3-12B abliterated (grimjim, multimodal VLM, image+text)
     (
@@ -627,6 +638,18 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/huihui-ai/Huihui-Qwen3.8-27B-Coder390-EfficientThink-abliterated-GGUF:IQ3_S",
         "huihui-ai  Qwen3.8-27B Coder390 EfficientThink abliterated  IQ3_S  ~16 GB  20K dl [2026-10-14]",
     ),
+    // 0bserverx RVN: triple ARA-pass (p-e-w/heretic × 3), KL:0.0085, refusals:0-1/100
+    //   1M+ downloads, Q4_K_M ~15.41 GiB, 262K ctx, VLM (mmproj), MTP preserved
+    (
+        "hf.co/0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:Q4_K_M",
+        "0bserverx  Qwen3.8-27B RVN triple-ARA Heretic  Q4_K_M  ~16 GB  KL:0.0085 refusals:0-1/100  1M+ downloads",
+    ),
+    // philbert440 Cyber: Aggressive abliteration + residual-cyber peel
+    //   cyber-open:100/100, gsm8k:0.80, factual:1.00, confab:0.867; VLM+MTP; 507K downloads
+    (
+        "hf.co/philbert440/Qwen3.8-27B-Uncensored-Cyber-GGUF:Q4_K_M",
+        "philbert440  Qwen3.8-27B Uncensored Cyber  Q4_K_M  ~16 GB  cyber-open:100/100 gsm8k:0.80  507K downloads",
+    ),
     // ── 26B class (SC117 gemma-4-26B) ────────────────────────────────────────
     (
         "hf.co/SC117/gemma-4-26B-A4B-it-qat-heretic-GGUF:Q4_K_M",
@@ -709,6 +732,12 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/SC117/occamy-1.0-abliterated-FIT-GGUF:Q4_K_M",
         "SC117    occamy-1.0 35B abliterated FIT  Q4_K_M  ~21 GB",
     ),
+    // huihui-ai CyberStrike-OffSec-35B abliterated — built on oyildirim/CyberStrike-OffSec-35B
+    //   remove-refusals abliteration; offensive security / pentesting / tool-calling; 65K downloads
+    (
+        "hf.co/huihui-ai/Huihui-CyberStrike-OffSec-35B-abliterated-GGUF:Q4_K",
+        "huihui-ai  CyberStrike-OffSec-35B abliterated (pentest)  Q4_K  ~21 GB  65K downloads",
+    ),
     // ── 49B class (TheDrummer Valkyrie) ──────────────────────────────────────
     // Valkyrie-49B v2.1 — NVIDIA Nemotron-Super-49B base, creative uncensored, 1.1K downloads
     (
@@ -731,6 +760,13 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/DavidAU/Qwen3.6-40B-Fable-Fusion-6-Core-Deckard-Eleanor-Heretic-Uncensored-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M",
         "DavidAU  Qwen3.6-40B 6-Core Deckard-Eleanor Heretic  Q4_K_M  ~24 GB",
+    ),
+    // dima6312 Flint-40B-A2.5B abliterated (NEW 2026-10-23): MITRE refusals 15%→0%
+    //   KL:0.0146, gsm8k:0.98, humaneval_plus:0.95, mmlu_pro:0.78, wmdp_cyber:0.60
+    //   abliterix + Optuna 50-trial search; Q4_K_M 24 GB; cybersecurity + code + MoE
+    (
+        "hf.co/dima6312/Flint-40B-A2.5B-abliterated-GGUF:Q4_K_M",
+        "dima6312  Flint-40B-A2.5B abliterated (cyber+code MoE)  Q4_K_M  ~24 GB  MITRE:0% gsm8k:0.98 humaneval:0.95  [new 2026-10-23]",
     ),
     // ── 70B–72B class ────────────────────────────────────────────────────────
     // Llama-3.3-70B abliterated (huihui-ai base, mradermacher imatrix quant)
@@ -786,6 +822,12 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/SC117/Qwen3.5-122B-A10B-Uncensored-APEX-Compact-GGUF:Q4_K_M",
         "SC117    Qwen3.5-122B-A10B Uncensored APEX (MoE)  Q4_K_M  ~60 GB",
+    ),
+    // mradermacher Qwen3.5-122B-A10B-abliterated (NEW 2026-10-23): pentest-tagged MoE
+    //   base: Chompa1422/Qwen3.5-122B-A10B-abliterated; tags: abliterated uncensored pentest qwen3.5
+    (
+        "hf.co/mradermacher/Qwen3.5-122B-A10B-abliterated-GGUF:Q4_K_M",
+        "mradermacher Qwen3.5-122B-A10B abliterated (pentest MoE)  Q4_K_M  ~74 GB  [new 2026-10-23]",
     ),
     // ── 177B class (GSQ-RCO sharded, requires Strata engine) ─────────────────
     // Qwen3.8 Flash-Next: 125B LM + 51B n-gram embedding + 4B MTP = ~177B

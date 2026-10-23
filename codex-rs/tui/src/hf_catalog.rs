@@ -54,6 +54,10 @@ const CATALOG_AUTHORS: &[&str] = &[
     // — CRACK / multi-tier abliteration specialists ————————————————————————
     "dealignai",             // CRACK series: Bonsai-27B ternary, MiniCPM-35B, Bolt-74B
     "BoldingBuilds",         // in-place abliteration on NVIDIA quantized GGUFs
+    // — October 2026 additions ————————————————————————————————————————————
+    "0bserverx",             // RVN triple-ARA abliteration (KL:0.0085), 1M+ downloads
+    "philbert440",           // Qwen3.8-27B cyber-specialized, 507K downloads
+    "dima6312",              // Flint-40B abliterix+Optuna, MITRE refusals 0%
 ];
 const CACHE_PATH_SUFFIX: &str = ".config/yugi/model_catalog.json";
 /// How many hours before the cache is considered stale.
