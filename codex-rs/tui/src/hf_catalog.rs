@@ -22,9 +22,13 @@ const CATALOG_AUTHORS: &[&str] = &[
     "cognitivecomputations",
     "mlabonne",
     "mradermacher",
+    "DevQuasar",
+    "huihui-ai",
     "Orenguteng",
     "UnfilteredAI",
     "failspy",
+    "maddes8cht",
+    "QuantFactory",
 ];
 const CACHE_PATH_SUFFIX: &str = ".config/yugi/model_catalog.json";
 /// How many hours before the cache is considered stale.
@@ -250,12 +254,17 @@ fn is_interesting_model(id: &str) -> bool {
         || low.contains("9b")
         || low.contains("12b")
         || low.contains("14b")
+        || low.contains("26b")
         || low.contains("27b")
+        || low.contains("30b")
+        || low.contains("31b")
         || low.contains("32b")
         || low.contains("35b")
         || low.contains("40b")
+        || low.contains("48b")
         || low.contains("70b")
         || low.contains("72b")
+        || low.contains("122b")
         || low.contains("123b")
         || low.contains("177b")
         || low.contains("235b")

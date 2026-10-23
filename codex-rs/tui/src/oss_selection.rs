@@ -471,11 +471,20 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     // ── 8B class ─────────────────────────────────────────────────────────────
     (
         "hf.co/DavidAU/Qwen3-8B-Hivemind-Instruct-Heretic-Abliterated-Uncensored-NEO-Imatrix-GGUF:Q4_K_M",
-        "DavidAU  Qwen3-8B Hivemind Heretic abliterated  Q4_K_M  ~5 GB  [ARC-C UNKNOWN]",
+        "DavidAU  Qwen3-8B Hivemind Heretic abliterated  Q4_K_M  ~5 GB",
+    ),
+    (
+        "hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M",
+        "mlabonne Llama-3.1-8B abliterated  Q4_K_M  ~5 GB  32K downloads",
     ),
     (
         "hf.co/SC117/QwenPaw-Flash-9B-heretic-GGUF:Q4_K_M",
         "SC117    Qwen3-9B QwenPaw-Flash heretic          Q4_K_M  ~6 GB",
+    ),
+    // ── 14B class ────────────────────────────────────────────────────────────
+    (
+        "hf.co/bartowski/mlabonne_Qwen3-14B-abliterated-GGUF:Q4_K_M",
+        "bartowski/mlabonne  Qwen3-14B abliterated  Q4_K_M  ~9 GB",
     ),
     // ── 27B class (dense, Heretic ARA uncensored) — verified model cards ─────
     // Qwen3.8-27B Turbo: ARC-C 0.735, ARC-E 0.882 (Nightmedia instruct), GPQA-D 89.2 (base),
@@ -495,12 +504,66 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/DavidAU/Qwen3.6-27B-Heretic-Uncensored-FINETUNE-NEO-CODE-Di-IMatrix-MAX-GGUF:Q4_K_M",
         "DavidAU  Qwen3.6-27B NEO-CODE Heretic (coder)  Q4_K_M  ~16 GB",
     ),
+    // Qwen3.8-27B TWIN-TURBO L: alternate cold-fusion abliteration variant
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-TWIN-TURBO-Fable-Cold-Fusion-709-L-Uncensored-NM-DAU-NEO-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B TWIN-TURBO-L Uncensored  Q4_K_M  ~16 GB",
+    ),
+    // Qwen3.8-27B TWIN-TURBO ULTRA HERETIC: highest-refusal-drop TURBO variant
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-TWIN-TURBO-Fable-Cold-Fusion-709-ULTRA-HERETIC-Uncensored-NM-DAU-NEO-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B TWIN-TURBO ULTRA Heretic  Q4_K_M  ~16 GB",
+    ),
     // SC117 Qwen3.8-27B uncensored FIT (SC117's abliteration method)
     (
         "hf.co/SC117/Qwen3.8-27B-Uncensored-FIT-GGUF:Q4_K_M",
         "SC117    Qwen3.8-27B Uncensored FIT  Q4_K_M  ~16 GB",
     ),
-    // ── 35B class (SC117 occamy) ──────────────────────────────────────────────
+    // mlabonne gemma-3-27b abliterated (verified, popular, Q4_K_M and Q6_K)
+    (
+        "hf.co/mlabonne/gemma-3-27b-it-abliterated-GGUF:Q4_K_M",
+        "mlabonne gemma-3-27b-it abliterated  Q4_K_M  ~17 GB",
+    ),
+    (
+        "hf.co/mlabonne/gemma-3-27b-it-abliterated-GGUF:Q6_K",
+        "mlabonne gemma-3-27b-it abliterated  Q6_K    ~22 GB  (higher quality)",
+    ),
+    // bartowski re-quant of mlabonne gemma-3-27b (wider quant selection)
+    (
+        "hf.co/bartowski/mlabonne_gemma-3-27b-it-abliterated-GGUF:Q4_K_M",
+        "bartowski/mlabonne gemma-3-27b abliterated  Q4_K_M  ~17 GB",
+    ),
+    // ── 26B class (SC117 gemma-4-26B) ────────────────────────────────────────
+    (
+        "hf.co/SC117/gemma-4-26B-A4B-it-qat-heretic-GGUF:Q4_K_M",
+        "SC117    gemma-4-26B heretic QAT  Q4_K_M  ~16 GB  28K downloads",
+    ),
+    // ── 31B class (DavidAU gemma-4-31B) ─────────────────────────────────────
+    (
+        "hf.co/DavidAU/gemma-4-31B-it-Mystery-Fine-Tune-HERETIC-UNCENSORED-Thinking-Instruct-GGUF:Q4_K_M",
+        "DavidAU  gemma-4-31B Heretic Mystery (thinking)  Q4_K_M  ~19 GB",
+    ),
+    // ── 34B MoE class (DavidAU Qwen3-48B-A4B Savant, effective ~34B) ─────────
+    (
+        "hf.co/DavidAU/Qwen3-48B-A4B-Savant-Commander-Distill-12X-Closed-Open-Heretic-Uncensored-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-48B-A4B Savant Heretic (MoE)  Q4_K_M  ~20 GB",
+    ),
+    // ── 35B class ────────────────────────────────────────────────────────────
+    // SC117 Qwen3.6-35B-A3B MoE uncensored heretic — 65K downloads
+    (
+        "hf.co/SC117/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-APEX-GGUF:Q4_K_M",
+        "SC117    Qwen3.6-35B-A3B Uncensored Heretic (MoE)  Q4_K_M  ~21 GB  65K downloads",
+    ),
+    // SC117 Ornith-1.0-35B Heretic — 25K downloads (flagship Ornith series)
+    (
+        "hf.co/SC117/Ornith-1.0-35B-Heretic-MTP-APEX-GGUF:Q4_K_M",
+        "SC117    Ornith-1.0-35B Heretic MTP APEX  Q4_K_M  ~21 GB  25K downloads",
+    ),
+    // SC117 Ornith-1.5-35B-A3B Heretic MoE — 14K downloads (MoE variant)
+    (
+        "hf.co/SC117/Ornith-1.5-35B-A3B-Heretic-MTP-APEX-GGUF:Q4_K_M",
+        "SC117    Ornith-1.5-35B-A3B Heretic (MoE)  Q4_K_M  ~21 GB  14K downloads",
+    ),
     (
         "hf.co/SC117/occamy-1.0-abliterated-FIT-GGUF:Q4_K_M",
         "SC117    occamy-1.0 35B abliterated FIT  Q4_K_M  ~21 GB",
@@ -517,6 +580,42 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/DavidAU/Qwen3.6-40B-Grand-Intelligence-Fable-Fusion-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M",
         "DavidAU  Qwen3.6-40B Grand-Intelligence Heretic  Q4_K_M  ~24 GB",
     ),
+    // Qwen3.6-40B Fable-Fusion-6-Core Deckard-Eleanor: 6-core cold fusion merge
+    (
+        "hf.co/DavidAU/Qwen3.6-40B-Fable-Fusion-6-Core-Deckard-Eleanor-Heretic-Uncensored-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-40B 6-Core Deckard-Eleanor Heretic  Q4_K_M  ~24 GB",
+    ),
+    // ── 70B–72B class ────────────────────────────────────────────────────────
+    // Llama-3.3-70B abliterated (huihui-ai base, mradermacher imatrix quant)
+    (
+        "hf.co/mradermacher/Llama-3.3-70B-Instruct-abliterated-i1-GGUF:Q4_K_M",
+        "mradermacher Llama-3.3-70B abliterated imatrix  Q4_K_M  ~43 GB",
+    ),
+    // Llama-3.1-70B abliterated (mradermacher)
+    (
+        "hf.co/mradermacher/Llama-3.1-70B-Instruct-abliterated-GGUF:Q4_K_M",
+        "mradermacher Llama-3.1-70B abliterated  Q4_K_M  ~43 GB",
+    ),
+    // Qwen2.5-72B abliterated (huihui-ai, via DevQuasar GGUF pack)
+    (
+        "hf.co/DevQuasar/huihui-ai.Qwen2.5-72B-Instruct-abliterated-GGUF:Q4_K_M",
+        "DevQuasar/huihui-ai  Qwen2.5-72B abliterated  Q4_K_M  ~43 GB",
+    ),
+    // dolphin-2.9.2-qwen2-72b (uncensored, bartowski quant)
+    (
+        "hf.co/bartowski/dolphin-2.9.2-qwen2-72b-GGUF:Q4_K_M",
+        "bartowski dolphin-2.9.2-qwen2-72b uncensored  Q4_K_M  ~43 GB",
+    ),
+    // dolphin-2.9-llama3-70b (uncensored, bartowski quant)
+    (
+        "hf.co/bartowski/dolphin-2.9-llama3-70b-GGUF:Q4_K_M",
+        "bartowski dolphin-2.9-llama3-70b uncensored  Q4_K_M  ~43 GB",
+    ),
+    // ── 122B MoE class (SC117, Qwen3.5-122B-A10B) ────────────────────────────
+    (
+        "hf.co/SC117/Qwen3.5-122B-A10B-Uncensored-APEX-Compact-GGUF:Q4_K_M",
+        "SC117    Qwen3.5-122B-A10B Uncensored APEX (MoE)  Q4_K_M  ~60 GB",
+    ),
     // ── 177B class (GSQ-RCO sharded, requires Strata engine) ─────────────────
     // Qwen3.8 Flash-Next: 125B LM + 51B n-gram embedding + 4B MTP = ~177B
     // GPQA-Diamond 92.93 (IQ3_S measured), SC117 abliteration of GSQ-RCO quant
@@ -525,7 +624,7 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF:IQ3_S",
         "DavidAU  177B Flash-Next Abliterated GSQ-RCO  IQ3_S  ~84 GB  GPQA:92.93  [Strata]",
     ),
-    // SC117 Swift-1.5 — newest SC117 abliteration of Flash-Next GSQ-RCO (updated 14 days ago)
+    // SC117 Swift-1.5 — newest SC117 abliteration of Flash-Next GSQ-RCO
     (
         "hf.co/SC117/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF:IQ3_S",
         "SC117    177B Swift-1.5 Flash-Next abliterated   IQ3_S  ~84 GB  [Strata]",
