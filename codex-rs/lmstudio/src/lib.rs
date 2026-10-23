@@ -4,7 +4,9 @@ pub use client::LMStudioClient;
 use codex_core::config::Config;
 
 /// Default OSS model to use when `--oss` is passed without an explicit `-m`.
-pub const DEFAULT_OSS_MODEL: &str = "openai/gpt-oss-20b";
+/// Default model for LM Studio — Qwen3 8B Instruct is a common choice.
+/// Override with -m to use DavidAU/Drowzey, Sc117 abliterated, Crack 27B, etc.
+pub const DEFAULT_OSS_MODEL: &str = "qwen3-8b-instruct";
 
 /// Prepare the local OSS environment when `--oss` is selected.
 ///

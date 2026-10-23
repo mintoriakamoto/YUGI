@@ -397,14 +397,14 @@ pub(crate) async fn detect_oss_provider() -> OssProviderDetection {
                     provider_id: OLLAMA_OSS_PROVIDER_ID.to_string(),
                     port: DEFAULT_OLLAMA_PORT,
                     label: "Ollama".to_string(),
-                    description: "Ollama (port 11434) — not detected, but you can start it".to_string(),
+                    description: "Ollama (port 11434) — run: ollama pull qwen3:8b  (or DavidAU/Drowzey, Sc117, Crack 27B GGUF via hf.co/...)".to_string(),
                     base_url: None,
                 });
                 discovered.push(DiscoveredServer {
                     provider_id: LMSTUDIO_OSS_PROVIDER_ID.to_string(),
                     port: DEFAULT_LMSTUDIO_PORT,
                     label: "LM Studio".to_string(),
-                    description: "LM Studio (port 1234) — not detected, but you can start it".to_string(),
+                    description: "LM Studio (port 1234) — load qwen3-8b-instruct or DavidAU/Drowzey GGUF from HuggingFace".to_string(),
                     base_url: None,
                 });
             }
