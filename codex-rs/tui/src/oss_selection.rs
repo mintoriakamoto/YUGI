@@ -576,6 +576,32 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
         "hf.co/Epiculous/Effervescence-27B-GGUF:Q4_K_M",
         "Epiculous  Effervescence-27B uncensored RP  Q4_K_M  ~16 GB",
     ),
+    // ── 27B class — October 2026 new ─────────────────────────────────────────
+    // Qwen3.8-27B Jumbo-Fusion-IQ: ARC-C 0.747 (BF16) / 0.742 (Q4), ARC-E 0.900
+    //   "first fine-tune to hit 747 arc-c" — 161 pts above base Qwen3.8-27B
+    //   15 AI Constructs + Turbo-Brilliance 50X; NEO-MAX-MTP; [2026-10-21]
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-Jumbo-Fusion-IQ-747-900-Turbo-Brilliance-50X-Reasoning-Instruct-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B Jumbo-Fusion IQ747  Q4_K_M  ~16 GB  ARC-C:0.742 ARC-E:0.900 [2026-10-21]",
+    ),
+    // Qwen3.8-27B Turbo-Brilliance-50X NEO-MAX-MTP: 343K downloads, GSQ-RCO based
+    //   27 reasoning + 27 instruct + 9 xhigh modes via prompt; [2026-10-17]
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-Turbo-Brilliance-50X-Reasoning-Instruct-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B Turbo-Brilliance-50X NEO-MTP  Q4_K_M  ~16 GB  343K downloads [2026-10-17]",
+    ),
+    // huihui-ai Qwen3.8-27B base abliterated: 2.4M downloads, multi-series
+    //   variants: GSQ-RCO, Swift-1.5, Ternary, UD-DW; Q4_K_L is best dense quant; [2026-10-10]
+    (
+        "hf.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF:Q4_K_L",
+        "huihui-ai  Qwen3.8-27B abliterated (base)  Q4_K_L  ~17 GB  2.4M downloads [2026-10-10]",
+    ),
+    // huihui-ai Qwen3.8-27B Coder390-EfficientThink abliterated: coding+thinking distilled
+    //   from Opus5.5/GPT6Astra/Grok4.7; PPL improved after abliteration (4.17→4.16); [2026-10-14]
+    (
+        "hf.co/huihui-ai/Huihui-Qwen3.8-27B-Coder390-EfficientThink-abliterated-GGUF:IQ3_S",
+        "huihui-ai  Qwen3.8-27B Coder390 EfficientThink abliterated  IQ3_S  ~16 GB  20K dl [2026-10-14]",
+    ),
     // ── 26B class (SC117 gemma-4-26B) ────────────────────────────────────────
     (
         "hf.co/SC117/gemma-4-26B-A4B-it-qat-heretic-GGUF:Q4_K_M",
@@ -719,6 +745,13 @@ static PREFERRED_MODELS: &[(&str, &str)] = &[
     (
         "hf.co/huihui-ai/Huihui-Qwen3.8-Flash-Next-abliterated-v2-GGUF:Q4_K_M",
         "huihui-ai Qwen3.8-Flash-Next abliterated v2 (MoE)  Q4_K_M  ~84 GB  [new 2026-10-19]",
+    ),
+    // SC117 Qwen3.8-Flash-Next GSQ-RCO abliterated [2026-10-03]: 2.1M downloads
+    //   144 tensors transplanted; preserves GSQ quant exactly (per-tensor blake2b verified)
+    //   262K context; 55.1 GB IQ3_S; distinct from Swift-1.5 (this is the non-Swift variant)
+    (
+        "hf.co/SC117/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF:IQ3_S",
+        "SC117    177B Flash-Next GSQ-RCO abliterated  IQ3_S  ~55 GB  2.1M downloads [2026-10-03]  [Strata]",
     ),
     // SC117 Swift-1.5 — newest SC117 abliteration of Flash-Next GSQ-RCO
     (
