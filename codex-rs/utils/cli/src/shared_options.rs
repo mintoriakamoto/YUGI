@@ -26,8 +26,8 @@ pub struct SharedCliOptions {
     #[arg(long = "oss", default_value_t = true)]
     pub oss: bool,
 
-    /// Specify which local provider to use (lmstudio or ollama). Defaults to ollama.
-    #[arg(long = "local-provider", default_value = "ollama")]
+    /// Specify which local provider to use (e.g. ollama, lmstudio). Auto-detected if not set.
+    #[arg(long = "local-provider")]
     pub oss_provider: Option<String>,
 
     /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
