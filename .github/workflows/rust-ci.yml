@@ -111,7 +111,7 @@ jobs:
     name: Argument comment lint package
     runs-on: ubuntu-24.04
     needs: changed
-    if: ${{ needs.changed.outputs.argument_comment_lint_package == 'true' }}
+    if: false  # YUGI: Disabled - argument-comment-lint requires Bazel infrastructure
     env:
       CARGO_DYLINT_VERSION: 6.1.0
       DYLINT_LINK_VERSION: 6.1.0
@@ -167,6 +167,7 @@ jobs:
     runs-on: ${{ matrix.runs_on || matrix.runner }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: changed
+    if: false  # YUGI: Disabled - argument-comment-lint requires Bazel infrastructure
     environment:
       name: bazel
       deployment: false
