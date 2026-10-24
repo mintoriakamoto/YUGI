@@ -70,8 +70,8 @@ jobs:
           cargo build --release -p codex-cli -p codex-code-mode-host
           install_dir="${GITHUB_WORKSPACE}/.tmp/sdk-ci"
           mkdir -p "${install_dir}"
-          install -m 755 target/release/codex target/release/codex-code-mode-host "${install_dir}"
-          echo "CODEX_EXEC_PATH=${install_dir}/codex" >> "$GITHUB_ENV"
+          install -m 755 target/release/yugi target/release/codex-code-mode-host "${install_dir}"
+          echo "CODEX_EXEC_PATH=${install_dir}/yugi" >> "$GITHUB_ENV"
 
       - name: Warm up Cargo-built codex
         shell: bash
