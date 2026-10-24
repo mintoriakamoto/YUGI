@@ -119,6 +119,9 @@ mod strict_3p_cache;
 #[path = "scenarios_agent_message_board.rs"]
 mod agent_message_board;
 
+#[path = "scenarios_agent_message_board_remote.rs"]
+mod agent_message_board_remote;
+
 #[path = "scenarios_mailbox_preemption_tests.rs"]
 mod mailbox_preemption;
 
