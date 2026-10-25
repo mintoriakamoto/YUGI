@@ -2,7 +2,12 @@
 //! Discovery and selection outcomes stay independent of the picker layout.
 
 use std::io;
-use std::sync::LazyLock;
+use std::process::Stdio;
+
+use crate::hf_catalog;
+
+use futures::future::join_all;
+use tokio::io::AsyncBufReadExt as _;
 
 use crate::bottom_pane::picker_option_list;
 use crate::bottom_pane::render_menu_surface;
@@ -36,7 +41,6 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::*;
-use ratatui::style::Color;
 use ratatui::text::Line;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
@@ -45,43 +49,85 @@ use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use std::time::Duration;
 
+/// A local AI server discovered during port scanning.
 #[derive(Clone)]
-pub(crate) enum ProviderStatus {
-    Running,
-    NotRunning,
-    Unknown,
+pub(crate) struct DiscoveredServer {
+    /// Canonical provider ID ("ollama" or "lmstudio").
+    pub(crate) provider_id: String,
+    /// Port the server is listening on.
+    pub(crate) port: u16,
+    /// Human-readable label for the picker.
+    pub(crate) label: String,
+    /// Short description shown below the picker.
+    pub(crate) description: String,
+    /// Full base URL override (None = use provider default).
+    pub(crate) base_url: Option<String>,
 }
 
-/// Options displayed in the *select* mode.
-///
-/// The `key` is matched case-insensitively.
+/// All known local AI servers and their default ports.
+struct ServerSpec {
+    provider_id: &'static str,
+    port: u16,
+    label: &'static str,
+    description: &'static str,
+}
+
+const KNOWN_SERVERS: &[ServerSpec] = &[
+    ServerSpec {
+        provider_id: OLLAMA_OSS_PROVIDER_ID,
+        port: DEFAULT_OLLAMA_PORT,
+        label: "Ollama",
+        description: "Ollama (port 11434) — default",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: DEFAULT_LMSTUDIO_PORT,
+        label: "LM Studio",
+        description: "LM Studio (port 1234) — OpenAI-compatible",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: 8000,
+        label: "vLLM / LocalAI (8000)",
+        description: "vLLM or compatible server on port 8000",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: 8080,
+        label: "Strata / LlamaFile (8080)",
+        description: "Strata (github.com/Niko1221/Strata) or LlamaFile on port 8080 — runs 177B sharded models on consumer GPUs",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: 5001,
+        label: "Text-gen-webui (5001)",
+        description: "Oobabooga text-generation-webui on port 5001",
+    },
+    ServerSpec {
+        provider_id: OLLAMA_OSS_PROVIDER_ID,
+        port: 11435,
+        label: "Ollama (11435)",
+        description: "Ollama on alternate port 11435",
+    },
+    ServerSpec {
+        provider_id: LMSTUDIO_OSS_PROVIDER_ID,
+        port: 12434,
+        label: "LM Studio (12434)",
+        description: "LM Studio on alternate port 12434",
+    },
+];
+
+/// An option shown in the interactive picker.
 struct SelectOption {
     label: Line<'static>,
-    description: &'static str,
+    description: String,
     key: KeyCode,
-    provider_id: &'static str,
+    provider_id: String,
+    base_url: Option<String>,
 }
-
-static OSS_SELECT_OPTIONS: LazyLock<Vec<SelectOption>> = LazyLock::new(|| {
-    vec![
-        SelectOption {
-            label: Line::from(vec!["L".underlined(), "M Studio".into()]),
-            description: "Local LM Studio server (default port 1234)",
-            key: KeyCode::Char('l'),
-            provider_id: LMSTUDIO_OSS_PROVIDER_ID,
-        },
-        SelectOption {
-            label: Line::from(vec!["O".underlined(), "llama".into()]),
-            description: "Local Ollama server (Responses API, default port 11434)",
-            key: KeyCode::Char('o'),
-            provider_id: OLLAMA_OSS_PROVIDER_ID,
-        },
-    ]
-});
 
 // This startup wizard runs before the main TUI runtime keymap is available, so
 // it retains the built-in horizontal shortcuts alongside vertical navigation.
-// The shared matcher still covers raw C0 Ctrl-H/Ctrl-L terminal reports.
 const MOVE_LEFT_KEYS: [KeyBinding; 2] = [
     key_hint::plain(KeyCode::Left),
     key_hint::ctrl(KeyCode::Char('h')),
@@ -91,33 +137,54 @@ const MOVE_RIGHT_KEYS: [KeyBinding; 2] = [
     key_hint::ctrl(KeyCode::Char('l')),
 ];
 
-pub struct OssSelectionWidget<'a> {
-    select_options: &'a Vec<SelectOption>,
-    provider_statuses: [ProviderStatus; 2],
+pub struct OssSelectionWidget {
+    select_options: Vec<SelectOption>,
 
-    /// Currently selected index in *select* mode.
+    /// Currently selected index.
     selected_option: usize,
 
-    /// Set to `true` once a decision has been sent – the parent view can then
-    /// remove this widget from its queue.
     done: bool,
-
-    selection: Option<String>,
+    selection: Option<(String, Option<String>)>, // (provider_id, base_url)
 }
 
-impl OssSelectionWidget<'_> {
-    fn new(lmstudio_status: ProviderStatus, ollama_status: ProviderStatus) -> Self {
+impl OssSelectionWidget {
+    fn from_discovered(servers: &[DiscoveredServer]) -> Self {
+        let digit_keys: &[char] = &['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+        let options: Vec<SelectOption> = servers
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let key = if i < digit_keys.len() {
+                    KeyCode::Char(digit_keys[i])
+                } else {
+                    KeyCode::Null
+                };
+                SelectOption {
+                    label: Line::from(vec![
+                        Span::raw(s.label.clone()),
+                        Span::styled(
+                            format!(" (port {})", s.port),
+                            Style::default().add_modifier(Modifier::DIM),
+                        ),
+                    ]),
+                    description: s.description.clone(),
+                    key,
+                    provider_id: s.provider_id.clone(),
+                    base_url: s.base_url.clone(),
+                }
+            })
+            .collect();
+
         Self {
-            select_options: &OSS_SELECT_OPTIONS,
-            provider_statuses: [lmstudio_status, ollama_status],
+            select_options: options,
             selected_option: 0,
             done: false,
             selection: None,
         }
     }
 
-    /// Consume a press while the picker is visible, returning a completed decision.
-    pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<String> {
+    /// Consume a key press; returns the completed decision when done.
+    pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<(String, Option<String>)> {
         if key.kind == KeyEventKind::Press {
             self.handle_select_key(key);
         }
@@ -128,9 +195,6 @@ impl OssSelectionWidget<'_> {
         }
     }
 
-    /// Normalize a key for comparison.
-    /// - For `KeyCode::Char`, converts to lowercase for case-insensitive matching.
-    /// - Other key codes are returned unchanged.
     fn normalize_keycode(code: KeyCode) -> KeyCode {
         match code {
             KeyCode::Char(c) => KeyCode::Char(c.to_ascii_lowercase()),
@@ -139,111 +203,109 @@ impl OssSelectionWidget<'_> {
     }
 
     fn handle_select_key(&mut self, key_event: KeyEvent) {
+        let n = self.select_options.len();
         match key_event {
             KeyEvent {
                 code: KeyCode::Char('c'),
                 modifiers,
                 ..
             } if modifiers.contains(KeyModifiers::CONTROL) => {
-                self.send_decision("__CANCELLED__".to_string());
+                self.send_decision("__CANCELLED__".to_string(), None);
             }
             _ if MOVE_LEFT_KEYS.is_pressed(key_event)
                 || matches!(key_event.code, KeyCode::Up | KeyCode::Char('k')) =>
             {
-                self.selected_option = (self.selected_option + self.select_options.len() - 1)
-                    % self.select_options.len();
+                if n > 0 {
+                    self.selected_option = (self.selected_option + n - 1) % n;
+                }
             }
             _ if MOVE_RIGHT_KEYS.is_pressed(key_event)
                 || matches!(key_event.code, KeyCode::Down | KeyCode::Char('j')) =>
             {
-                self.selected_option = (self.selected_option + 1) % self.select_options.len();
+                if n > 0 {
+                    self.selected_option = (self.selected_option + 1) % n;
+                }
             }
             KeyEvent {
                 code: KeyCode::Enter,
                 ..
             } => {
-                let opt = &self.select_options[self.selected_option];
-                self.send_decision(opt.provider_id.to_string());
+                if n > 0 {
+                    let opt = &self.select_options[self.selected_option];
+                    self.send_decision(opt.provider_id.clone(), opt.base_url.clone());
+                }
             }
             KeyEvent {
                 code: KeyCode::Esc, ..
             } => {
-                self.send_decision(LMSTUDIO_OSS_PROVIDER_ID.to_string());
-            }
-            KeyEvent {
-                code: KeyCode::Char('1' | '2'),
-                ..
-            } => {
-                let index = usize::from(key_event.code == KeyCode::Char('2'));
-                self.send_decision(self.select_options[index].provider_id.to_string());
+                // Default to first option on Esc.
+                if n > 0 {
+                    let opt = &self.select_options[0];
+                    self.send_decision(opt.provider_id.clone(), opt.base_url.clone());
+                }
             }
             KeyEvent { code, .. } => {
-                let other = code;
-                let normalized = Self::normalize_keycode(other);
+                let normalized = Self::normalize_keycode(code);
                 if let Some(opt) = self
                     .select_options
                     .iter()
                     .find(|opt| Self::normalize_keycode(opt.key) == normalized)
                 {
-                    self.send_decision(opt.provider_id.to_string());
+                    self.send_decision(opt.provider_id.clone(), opt.base_url.clone());
                 }
             }
         }
     }
 
-    fn send_decision(&mut self, selection: String) {
-        self.selection = Some(selection);
+    fn send_decision(&mut self, provider_id: String, base_url: Option<String>) {
+        self.selection = Some((provider_id, base_url));
         self.done = true;
     }
 
-    /// Returns `true` once the user has made a decision and the widget no
-    /// longer needs to be displayed.
     pub fn is_complete(&self) -> bool {
         self.done
     }
 }
 
-impl WidgetRef for &OssSelectionWidget<'_> {
+impl WidgetRef for &OssSelectionWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
         let mut column = FlexRenderable::new();
         column.push(/*flex*/ 1, RenderableItem::Borrowed(&""));
         column.push(
             /*flex*/ 0,
-            Paragraph::new("Select an open-source provider".bold())
+            Paragraph::new("Select a local AI server".bold())
                 .wrap(Wrap { trim: false })
                 .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
         );
         column.push(
             /*flex*/ 1,
-            Paragraph::new("Choose a local AI server for this session.".dim())
+            Paragraph::new("YUGI detected the following running servers.".dim())
                 .wrap(Wrap { trim: false })
                 .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
         );
         let labels: Vec<_> = self
             .select_options
             .iter()
-            .zip(&self.provider_statuses)
-            .map(|(option, status)| {
-                let (label, color) = match status {
-                    ProviderStatus::Running => ("● Running", Color::Green),
-                    ProviderStatus::NotRunning => ("○ Not running", Color::Red),
-                    ProviderStatus::Unknown => ("? Unknown", Color::Yellow),
-                };
-                let mut line = option.label.clone();
-                line.spans.extend([" · ".dim(), label.fg(color)]);
-                line
-            })
+            .map(|option| option.label.clone())
             .collect();
         column.push(
             /*flex*/ 0,
             picker_option_list(labels, self.selected_option),
         );
+        let desc = self
+            .select_options
+            .get(self.selected_option)
+            .map(|o| o.description.clone())
+            .unwrap_or_default();
         column.push(
             /*flex*/ 1,
-            Paragraph::new(self.select_options[self.selected_option].description.dim())
-                .wrap(Wrap { trim: false })
-                .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
+            Paragraph::new(Span::styled(
+                desc,
+                Style::default().add_modifier(Modifier::DIM),
+            ))
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(/*v*/ 0, /*h*/ 2)),
         );
         column.push(/*flex*/ 1, RenderableItem::Borrowed(&""));
         column.push(
@@ -253,8 +315,6 @@ impl WidgetRef for &OssSelectionWidget<'_> {
                 " choose · ".dim(),
                 key_hint::plain(KeyCode::Enter).into(),
                 " select · ".dim(),
-                key_hint::plain(KeyCode::Esc).into(),
-                " LM Studio · ".dim(),
                 key_hint::ctrl(KeyCode::Char('c')).into(),
                 " exit".dim(),
             ]))
@@ -274,57 +334,99 @@ impl WidgetRef for &OssSelectionWidget<'_> {
 pub(crate) struct OssProviderSelection {
     pub(crate) provider: String,
     pub(crate) manually_selected: bool,
+    /// If Some, caller should set CODEX_OSS_BASE_URL to this value.
+    pub(crate) base_url: Option<String>,
 }
 
 pub(crate) enum OssProviderDetection {
     AutoSelected(OssProviderSelection),
-    NeedsSelection {
-        lmstudio_status: ProviderStatus,
-        ollama_status: ProviderStatus,
-    },
+    /// No single server was auto-selected; present a picker with these options.
+    NeedsSelection(Vec<DiscoveredServer>),
 }
 
-/// Probe local providers without suspending the interactive startup composer.
+/// Probe all known local AI server ports in parallel and auto-select if exactly one responds.
 pub(crate) async fn detect_oss_provider() -> OssProviderDetection {
-    // These probes intentionally bypass proxy discovery because both targets are
-    // hardcoded plaintext loopback endpoints. Preserve the legacy custom-CA fallback so an
-    // invalid inherited certificate bundle cannot prevent best-effort provider detection.
+    // Bypass proxy for loopback connections; allow invalid inherited CA bundles.
     #[allow(deprecated)]
     let client = HttpClientBuilder::new().build_direct_with_custom_ca_fallback();
 
-    // Check provider statuses first
-    let lmstudio_status = check_lmstudio_status(&client).await;
-    let ollama_status = check_ollama_status(&client).await;
+    // Probe all ports concurrently.
+    let probes: Vec<_> = KNOWN_SERVERS
+        .iter()
+        .map(|spec| {
+            let c = client.clone();
+            async move {
+                let running = check_port_status(&c, spec.port).await.unwrap_or(false);
+                (spec, running)
+            }
+        })
+        .collect();
 
-    // Autoselect if only one is running
-    match (&lmstudio_status, &ollama_status) {
-        (ProviderStatus::Running, ProviderStatus::NotRunning) => {
-            let provider = LMSTUDIO_OSS_PROVIDER_ID.to_string();
+    let results = join_all(probes).await;
+
+    let mut discovered: Vec<DiscoveredServer> = Vec::new();
+    for (spec, running) in results {
+        if running {
+            let is_default_port = (spec.provider_id == OLLAMA_OSS_PROVIDER_ID
+                && spec.port == DEFAULT_OLLAMA_PORT)
+                || (spec.provider_id == LMSTUDIO_OSS_PROVIDER_ID
+                    && spec.port == DEFAULT_LMSTUDIO_PORT);
+
+            let base_url = if is_default_port {
+                None
+            } else {
+                Some(format!("http://localhost:{}/v1", spec.port))
+            };
+
+            discovered.push(DiscoveredServer {
+                provider_id: spec.provider_id.to_string(),
+                port: spec.port,
+                label: spec.label.to_string(),
+                description: spec.description.to_string(),
+                base_url,
+            });
+        }
+    }
+
+    match discovered.len() {
+        1 => {
+            let server = discovered.remove(0);
             OssProviderDetection::AutoSelected(OssProviderSelection {
-                provider,
+                provider: server.provider_id,
                 manually_selected: false,
+                base_url: server.base_url,
             })
         }
-        (ProviderStatus::NotRunning, ProviderStatus::Running) => {
-            let provider = OLLAMA_OSS_PROVIDER_ID.to_string();
-            OssProviderDetection::AutoSelected(OssProviderSelection {
-                provider,
-                manually_selected: false,
-            })
+        _ => {
+            if discovered.is_empty() {
+                // No servers running — show defaults so user can still pick one to launch.
+                discovered.push(DiscoveredServer {
+                    provider_id: OLLAMA_OSS_PROVIDER_ID.to_string(),
+                    port: DEFAULT_OLLAMA_PORT,
+                    label: "Ollama".to_string(),
+                    description: "Ollama (port 11434) — YUGI will show model picker on start"
+                        .to_string(),
+                    base_url: None,
+                });
+                discovered.push(DiscoveredServer {
+                    provider_id: LMSTUDIO_OSS_PROVIDER_ID.to_string(),
+                    port: DEFAULT_LMSTUDIO_PORT,
+                    label: "LM Studio".to_string(),
+                    description: "LM Studio (port 1234) — YUGI will show model picker on start"
+                        .to_string(),
+                    base_url: None,
+                });
+            }
+            OssProviderDetection::NeedsSelection(discovered)
         }
-        _ => OssProviderDetection::NeedsSelection {
-            lmstudio_status,
-            ollama_status,
-        },
     }
 }
 
-/// Run the actionable provider picker after provider discovery requires a user decision.
+/// Show the interactive picker and return the user's choice.
 pub(crate) async fn select_oss_provider(
-    lmstudio_status: ProviderStatus,
-    ollama_status: ProviderStatus,
+    discovered: Vec<DiscoveredServer>,
 ) -> io::Result<OssProviderSelection> {
-    let mut widget = OssSelectionWidget::new(lmstudio_status, ollama_status);
+    let mut widget = OssSelectionWidget::from_discovered(&discovered);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -341,11 +443,12 @@ pub(crate) async fn select_oss_provider(
 
         loop {
             if let Event::Key(key_event) = event::read()?
-                && let Some(selection) = widget.handle_key_event(key_event)
+                && let Some((provider_id, base_url)) = widget.handle_key_event(key_event)
             {
                 break Ok(OssProviderSelection {
-                    provider: selection,
+                    provider: provider_id,
                     manually_selected: true,
+                    base_url,
                 });
             }
 
@@ -361,20 +464,1021 @@ pub(crate) async fn select_oss_provider(
     result
 }
 
-async fn check_lmstudio_status(client: &HttpClient) -> ProviderStatus {
-    match check_port_status(client, DEFAULT_LMSTUDIO_PORT).await {
-        Ok(true) => ProviderStatus::Running,
-        Ok(false) => ProviderStatus::NotRunning,
-        Err(_) => ProviderStatus::Unknown,
+// ---------------------------------------------------------------------------
+// Model discovery, picker and auto-install
+// ---------------------------------------------------------------------------
+
+/// Curated HuggingFace GGUF models — abliterated/uncensored (Heretic method), high benchmarks.
+/// All use the Ollama `hf.co/<author>/<repo>:<quant>` syntax so `ollama pull` fetches them directly.
+/// Scores are from model cards: ARC-C via Nightmedia zero-shot instruct, GPQA-Diamond as reported.
+/// "Heretic ARA" = Arbitrary-Rank Ablation; refusal drop verified per card.
+static PREFERRED_MODELS: &[(&str, &str)] = &[
+    // ── 4B class ──────────────────────────────────────────────────────────────
+    // Qwen3.5-4B fully abliterated (SicariusSicariiStuff, 2026-03)
+    (
+        "hf.co/SicariusSicariiStuff/Qwen3.5-4B_Abliterated_GGUF:Q4_K_M",
+        "SicariusSicariiStuff  Qwen3.5-4B abliterated  Q4_K_M  ~2.5 GB",
+    ),
+    // HauhauCS Gemma-4-E4B Aggressive — VLM, MTP, 0/465 refusals; 920K downloads
+    (
+        "hf.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "HauhauCS  Gemma-4-E4B Uncensored Aggressive (VLM+MTP)  Q4_K_M  ~5 GB  0/465 refusals  920K downloads",
+    ),
+    // ── 8B class ─────────────────────────────────────────────────────────────
+    (
+        "hf.co/DavidAU/Qwen3-8B-Hivemind-Instruct-Heretic-Abliterated-Uncensored-NEO-Imatrix-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-8B Hivemind Heretic abliterated  Q4_K_M  ~5 GB  ARC-C:0.558 refusals:8/100",
+    ),
+    (
+        "hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M",
+        "mlabonne Llama-3.1-8B abliterated  Q4_K_M  ~5 GB  GPQA:0.89 IFEval:73.3  32K downloads",
+    ),
+    (
+        "hf.co/SC117/QwenPaw-Flash-9B-heretic-GGUF:Q4_K_M",
+        "SC117    Qwen3-9B QwenPaw-Flash heretic          Q4_K_M  ~6 GB  refusals:3/100",
+    ),
+    // DavidAU Qwen3.5-9B Defiant Fable: ARC-C 0.640 in 4bit+8bit, beats 7/7 benchmarks vs 27B
+    //   uncensored Heretic, NEO-IMATRIX MAX MTP, VLM (vision); 1.83M+ downloads
+    (
+        "hf.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.5-9B Defiant Fable Heretic  Q4_K_M  ~6 GB  ARC-C:0.640 beats 27B models  1.83M+ downloads",
+    ),
+    // mradermacher / huihui-ai Qwen3-VL-8B abliterated — VLM (image+text), apache-2.0
+    (
+        "hf.co/mradermacher/Huihui-Qwen3-VL-8B-Instruct-abliterated-GGUF:Q4_K_M",
+        "mradermacher/huihui-ai  Qwen3-VL-8B abliterated (VLM)  Q4_K_M  ~5 GB",
+    ),
+    // mradermacher Qwen3-VL-8B-Instruct abliterated (mradermacher's own abliteration, not Huihui)
+    //   644K downloads, VLM, apache-2.0; distinct from Huihui-Qwen3-VL-8B already in catalog
+    (
+        "hf.co/mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF:Q4_K_M",
+        "mradermacher  Qwen3-VL-8B abliterated (VLM)  Q4_K_M  ~5.1 GB  644K downloads",
+    ),
+    // HauhauCS Qwen3.5-9B Aggressive — 0/465 refusals, K_P quants; 651K downloads
+    (
+        "hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "HauhauCS  Qwen3.5-9B Uncensored Aggressive  Q4_K_M  ~5.3 GB  0/465 refusals  651K downloads",
+    ),
+    // mradermacher Ornith-1.5-9B-uncensored — ZeroFuse abliterated VLM; 1.67M downloads
+    (
+        "hf.co/mradermacher/Ornith-1.5-9B-uncensored-GGUF:Q4_K_M",
+        "mradermacher  Ornith-1.5-9B uncensored (ZeroFuse VLM)  Q4_K_M  ~5.7 GB  1.67M downloads",
+    ),
+    // ── 12B class ────────────────────────────────────────────────────────────
+    // gemma-3-12B abliterated (grimjim, multimodal VLM, image+text)
+    (
+        "hf.co/grimjim/gemma-3-12b-it-abliterated-GGUF:Q4_K_M",
+        "grimjim  gemma-3-12B abliterated (VLM)  Q4_K_M  ~7 GB",
+    ),
+    // Violet_Twilight v0.2 — SLERP merge uncensored creative RP, 8.7K downloads (Epiculous)
+    (
+        "hf.co/Epiculous/Violet_Twilight-v0.2-GGUF:Q4_K_M",
+        "Epiculous  Violet_Twilight v0.2 uncensored RP  Q4_K_M  ~7 GB  8.7K downloads",
+    ),
+    // Mistral NeMo 12B abliterated — mradermacher imatrix quant of DuoNeural abliteration
+    //   3.2K downloads; "Nemo" 12B abliterated (mechanistic-interpretability removal)
+    (
+        "hf.co/mradermacher/Mistral-NeMo-12B-Abliterated-i1-GGUF:Q4_K_M",
+        "mradermacher  Mistral-NeMo-12B abliterated imatrix  Q4_K_M  ~7 GB  3.2K downloads",
+    ),
+    // HauhauCS Gemma4-12B QAT Balanced — VLM, MTP ~35% faster, 0/465 refusals; 831K downloads
+    //   QAT weights → Q4_K_M ~6.9 GB stays close to full-precision quality
+    (
+        "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
+        "HauhauCS  Gemma4-12B QAT Balanced (VLM+MTP ~35% faster)  Q4_K_M  ~6.9 GB  0/465 refusals  831K downloads",
+    ),
+    // ── 14B class ────────────────────────────────────────────────────────────
+    (
+        "hf.co/bartowski/mlabonne_Qwen3-14B-abliterated-GGUF:Q4_K_M",
+        "bartowski/mlabonne  Qwen3-14B abliterated  Q4_K_M  ~9 GB",
+    ),
+    // ── 16B class (TheDrummer Rocinante-XL) ──────────────────────────────────
+    // Rocinante-XL-16B: creative storytelling / RP, 7K downloads, no-refusal by design
+    (
+        "hf.co/TheDrummer/Rocinante-XL-16B-v1-GGUF:Q4_K_M",
+        "TheDrummer  Rocinante-XL-16B v1 uncensored RP  Q4_K_M  ~10 GB  7K downloads",
+    ),
+    // DavidAU Qwen3-14B Cyber (TheDrummer-class quality)
+    (
+        "hf.co/DavidAU/Qwen3-14B-Cyber-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-14B Cyber uncensored  Q4_K_M  ~9 GB",
+    ),
+    // ── 22B class ────────────────────────────────────────────────────────────
+    // Codestral-22B abliterated v3 (failspy/bartowski) — 22B coding model, 9.2K downloads
+    //   Q4_K_M ~13 GB; failspy abliteration v3; no benchmark scores in README
+    (
+        "hf.co/bartowski/Codestral-22B-v0.1-abliterated-v3-GGUF:Q4_K_M",
+        "bartowski  Codestral-22B v0.1 abliterated-v3 (coding)  Q4_K_M  ~13 GB  9.2K downloads",
+    ),
+    // DavidAU Qwen3-22B-A3B-The-Harley-Quinn-PUDDIN — 22B MoE (64 experts, 8 active, ~3B active)
+    //   mradermacher imatrix quant; uncensored/abliterated; creative RP + reasoning
+    (
+        "hf.co/mradermacher/Qwen3-22B-A3B-The-Harley-Quinn-PUDDIN-Abliterated-Uncensored-i1-GGUF:Q4_K_M",
+        "mradermacher  Qwen3-22B-A3B Harley-Quinn PUDDIN (MoE 64exp/8act)  Q4_K_M  ~8 GB",
+    ),
+    // DavidAU Qwen3-22B Xiaolong-Josiefied-Omega-Directive — 62-layer merge of 3×14B models
+    //   1.4K downloads; reasoning on/off; uncensored/abliterated
+    (
+        "hf.co/DavidAU/Qwen3-The-Xiaolong-Josiefied-Omega-Directive-22B-uncensored-abliterated-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-22B Xiaolong-Josiefied-Omega (62L merge)  Q4_K_M  ~13 GB  uncensored",
+    ),
+    // ── 27B class (dense, Heretic ARA uncensored) — verified model cards ─────
+    // Qwen3.8-27B Turbo: ARC-C 0.735, ARC-E 0.882 (Nightmedia instruct), GPQA-D 89.2 (base),
+    //   SWE-bench Pro 61.7 (base); Heretic KL 0.0535, refusals 0/100; hybrid DeltaNet+Attn
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B TURBO Heretic  Q4_K_M  ~16 GB  ARC-C:0.735 ARC-E:0.882 GPQA:89.2 refusals:11/100 KL:0.0025",
+    ),
+    // Qwen3.6-27B Fable Fusion: ARC-C 0.711, ARC-E 0.879; Heretic KL 0.0469, refusals 4/100;
+    //   MMLU-Redux 93.5, SWE-bench Verified 77.2 (base Qwen3.6-27B); 4M+ total downloads
+    (
+        "hf.co/DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-27B Fable-Fusion Heretic  Q4_K_M  ~16 GB  ARC-C:0.711 MMLU:93.5 refusals:4/100",
+    ),
+    // Qwen3.6-27B NEO-CODE fine-tune: coding-focused, uncensored heretic
+    (
+        "hf.co/DavidAU/Qwen3.6-27B-Heretic-Uncensored-FINETUNE-NEO-CODE-Di-IMatrix-MAX-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-27B NEO-CODE Heretic (coder)  Q4_K_M  ~16 GB",
+    ),
+    // Qwen3.8-27B TWIN-TURBO L: alternate cold-fusion abliteration variant
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-TWIN-TURBO-Fable-Cold-Fusion-709-L-Uncensored-NM-DAU-NEO-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B TWIN-TURBO-L Uncensored  Q4_K_M  ~16 GB",
+    ),
+    // Qwen3.8-27B TWIN-TURBO ULTRA HERETIC: highest-refusal-drop TURBO variant
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-TWIN-TURBO-Fable-Cold-Fusion-709-ULTRA-HERETIC-Uncensored-NM-DAU-NEO-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B TWIN-TURBO ULTRA Heretic  Q4_K_M  ~16 GB",
+    ),
+    // SC117 Qwen3.8-27B uncensored FIT (SC117's abliteration method)
+    (
+        "hf.co/SC117/Qwen3.8-27B-Uncensored-FIT-GGUF:Q4_K_M",
+        "SC117    Qwen3.8-27B Uncensored FIT  Q4_K_M  ~16 GB",
+    ),
+    // mlabonne gemma-3-27b abliterated (verified, popular, Q4_K_M and Q6_K)
+    (
+        "hf.co/mlabonne/gemma-3-27b-it-abliterated-GGUF:Q4_K_M",
+        "mlabonne gemma-3-27b-it abliterated  Q4_K_M  ~17 GB",
+    ),
+    (
+        "hf.co/mlabonne/gemma-3-27b-it-abliterated-GGUF:Q6_K",
+        "mlabonne gemma-3-27b-it abliterated  Q6_K    ~22 GB  (higher quality)",
+    ),
+    // bartowski re-quant of mlabonne gemma-3-27b (wider quant selection)
+    (
+        "hf.co/bartowski/mlabonne_gemma-3-27b-it-abliterated-GGUF:Q4_K_M",
+        "bartowski/mlabonne gemma-3-27b abliterated  Q4_K_M  ~17 GB",
+    ),
+    // Qwen3.5-27B Heretic Marvin V1 — uncensored DPO+SFT creative writing anti-rep (ddh0 quant)
+    (
+        "hf.co/ddh0/Qwen3.5-27B-Heretic-Marvin-V1-GGUF:Q4_K_M",
+        "ddh0  Qwen3.5-27B Heretic Marvin V1 (DPO uncensored)  Q4_K_M  ~16 GB",
+    ),
+    // Huihui-Qwen3.5-27B abliterated Athanorlite ORPO v2 (nbeerbower, multimodal VLM)
+    (
+        "hf.co/nbeerbower/Huihui-Qwen3.5-27B-abliterated-Athanorlite-ORPO-v2-GGUF:Q4_K_M",
+        "nbeerbower  Qwen3.5-27B abliterated Athanorlite ORPO v2 (VLM)  Q4_K_M  ~16 GB",
+    ),
+    // Effervescence-27B — creative RP uncensored instruct (Epiculous, 2-phase LoRA train)
+    (
+        "hf.co/Epiculous/Effervescence-27B-GGUF:Q4_K_M",
+        "Epiculous  Effervescence-27B uncensored RP  Q4_K_M  ~16 GB",
+    ),
+    // ── 27B class — October 2026 new ─────────────────────────────────────────
+    // Qwen3.8-27B Jumbo-Fusion-IQ: ARC-C 0.747 (BF16) / 0.742 (Q4), ARC-E 0.900
+    //   "first fine-tune to hit 747 arc-c" — 161 pts above base Qwen3.8-27B
+    //   15 AI Constructs + Turbo-Brilliance 50X; NEO-MAX-MTP; [2026-10-21]
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-Jumbo-Fusion-IQ-747-900-Turbo-Brilliance-50X-Reasoning-Instruct-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B Jumbo-Fusion IQ747  Q4_K_M  ~16 GB  ARC-C:0.742 ARC-E:0.900 [2026-10-21]",
+    ),
+    // Qwen3.8-27B Turbo-Brilliance-50X NEO-MAX-MTP: 343K downloads, GSQ-RCO based
+    //   27 reasoning + 27 instruct + 9 xhigh modes via prompt; [2026-10-17]
+    (
+        "hf.co/DavidAU/Qwen3.8-27B-Turbo-Brilliance-50X-Reasoning-Instruct-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.8-27B Turbo-Brilliance-50X NEO-MTP  Q4_K_M  ~16 GB  343K downloads [2026-10-17]",
+    ),
+    // huihui-ai Qwen3.8-27B base abliterated: 2.4M downloads, multi-series
+    //   variants: GSQ-RCO, Swift-1.5, Ternary, UD-DW; Q4_K_L is best dense quant; [2026-10-10]
+    (
+        "hf.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF:Q4_K_L",
+        "huihui-ai  Qwen3.8-27B abliterated (base)  Q4_K_L  ~17 GB  2.4M downloads [2026-10-10]",
+    ),
+    // huihui-ai Qwen3.8-27B Coder390-EfficientThink abliterated: coding+thinking distilled
+    //   from Opus5.5/GPT6Astra/Grok4.7; PPL improved after abliteration (4.17→4.16); [2026-10-14]
+    (
+        "hf.co/huihui-ai/Huihui-Qwen3.8-27B-Coder390-EfficientThink-abliterated-GGUF:IQ3_S",
+        "huihui-ai  Qwen3.8-27B Coder390 EfficientThink abliterated  IQ3_S  ~16 GB  20K dl [2026-10-14]",
+    ),
+    // 0bserverx RVN: triple ARA-pass (p-e-w/heretic × 3), KL:0.0085, refusals:0-1/100
+    //   1M+ downloads, Q4_K_M ~15.41 GiB, 262K ctx, VLM (mmproj), MTP preserved
+    (
+        "hf.co/0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:Q4_K_M",
+        "0bserverx  Qwen3.8-27B RVN triple-ARA Heretic  Q4_K_M  ~16 GB  KL:0.0085 refusals:0-1/100  1M+ downloads",
+    ),
+    // philbert440 Cyber: Aggressive abliteration + residual-cyber peel
+    //   cyber-open:100/100, gsm8k:0.80, factual:1.00, confab:0.867; VLM+MTP; 507K downloads
+    (
+        "hf.co/philbert440/Qwen3.8-27B-Uncensored-Cyber-GGUF:Q4_K_M",
+        "philbert440  Qwen3.8-27B Uncensored Cyber  Q4_K_M  ~16 GB  cyber-open:100/100 gsm8k:0.80  507K downloads",
+    ),
+    // JonathanColetti Qwen3.8-27B-Uncensored — heretic (p-e-w KL-minimized)
+    //   KL:0.0141±0.0025, 96.72% same top token; VLM (mmproj), MTP; ~16.8 GB; 2.4M downloads
+    (
+        "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:Q4_K_M",
+        "JonathanColetti  Qwen3.8-27B Uncensored Heretic  Q4_K_M  ~16.8 GB  KL:0.0141 top-tok:96.72%  2.4M downloads",
+    ),
+    // HauhauCS Qwen3.8-27B Aggressive MTP — 0/465 refusals, FastMTP 3.02x TG speedup
+    //   K_P quants; ~16 GB; 2.27M downloads
+    (
+        "hf.co/HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF:Q4_K_M",
+        "HauhauCS  Qwen3.8-27B Aggressive (FastMTP 3.02x TG)  Q4_K_M  ~16 GB  0/465 refusals  2.27M downloads",
+    ),
+    // ── 26B class (SC117 gemma-4-26B) ────────────────────────────────────────
+    (
+        "hf.co/SC117/gemma-4-26B-A4B-it-qat-heretic-GGUF:Q4_K_M",
+        "SC117    gemma-4-26B heretic QAT  Q4_K_M  ~16 GB  refusals:13/100 KL:0.066  28K downloads",
+    ),
+    // HauhauCS Gemma4-26B QAT Balanced MTP — VLM, MTP ~35% faster, 0/465 refusals; 143K downloads
+    //   QAT weights, Q4_K_M 16.8 GB; mmproj vision tower included
+    (
+        "hf.co/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP:Q4_K_M",
+        "HauhauCS  Gemma4-26B QAT Balanced (VLM+MTP ~35% faster)  Q4_K_M  ~16.8 GB  0/465 refusals  143K downloads",
+    ),
+    // ── 24B class (LFM2.5 MoE uncensored, mradermacher, 2026-10-23) ──────────
+    // LFM2.5-24B-A2B-uncensored2: 24B total / 2B active MoE, heretic-tagged uncensored
+    (
+        "hf.co/mradermacher/LFM2.5-24B-A2B-uncensored2-GGUF:Q4_K_M",
+        "mradermacher LFM2.5-24B-A2B uncensored2 (MoE)  Q4_K_M  ~8 GB  [new 2026-10-23]",
+    ),
+    // LFM2.5-24B-A2B-uncensored2 imatrix variant
+    (
+        "hf.co/mradermacher/LFM2.5-24B-A2B-uncensored2-i1-GGUF:Q4_K_M",
+        "mradermacher LFM2.5-24B-A2B uncensored2 imatrix  Q4_K_M  ~8 GB  [new 2026-10-23]",
+    ),
+    // ── 31B class ────────────────────────────────────────────────────────────
+    // DavidAU gemma-4-31B Mystery Heretic (thinking mode, uncensored)
+    (
+        "hf.co/DavidAU/gemma-4-31B-it-Mystery-Fine-Tune-HERETIC-UNCENSORED-Thinking-Instruct-GGUF:Q4_K_M",
+        "DavidAU  gemma-4-31B Heretic Mystery (thinking)  Q4_K_M  ~19 GB",
+    ),
+    // TheDrummer Artemis-31B v1.1 — gemma-4-31B base, creative uncensored, 3.7K downloads
+    (
+        "hf.co/TheDrummer/Artemis-31B-v1.1-GGUF:Q4_K_M",
+        "TheDrummer  Artemis-31B v1.1 (gemma-4 base) uncensored  Q4_K_M  ~19 GB  3.7K downloads",
+    ),
+    // TheDrummer Skyfall-31B v4.2 — Magistral-Small-2509 base, 7K downloads
+    (
+        "hf.co/TheDrummer/Skyfall-31B-v4.2-GGUF:Q4_K_M",
+        "TheDrummer  Skyfall-31B v4.2 (Magistral base) uncensored  Q4_K_M  ~19 GB  7K downloads",
+    ),
+    // ── 27B CRACK (dealignai) ─────────────────────────────────────────────────
+    // Bonsai-2-27B Ternary CRACK — HarmBench-320: 0/320 refusals (0.00%), MMLU 39.91%
+    //   7.21 GB ternary PQ2_0 (2.13 bpw), vision-capable (VLM), 57K downloads
+    //   dealignai weight-level abliteration, all reasoning modes (off/low/xhigh) verified
+    (
+        "hf.co/dealignai/Bonsai-2-27B-Ternary-CRACK-GGUF:Q4_K_M",
+        "dealignai  Bonsai-2-27B Ternary CRACK (VLM) ~7 GB  HB-320:0/320 MMLU:39.91%  57K downloads",
+    ),
+    // ── 35B CRACK (dealignai MiniCPM-V-4.7) ──────────────────────────────────
+    // MiniCPM-V-4.7-35B-A3B CRACK — HB-240: 240/240 comply (100%), MMLU Q4_K_M 75.5% (+0.5pp)
+    //   ~22.6 GB, 35B-A3B MoE (Qwen3.5-moe hybrid GatedDeltaNet), multimodal VLM, 34K downloads
+    //   dealignai 3-tier abliteration (SSM + attention + router paths)
+    (
+        "hf.co/dealignai/MiniCPM-V-4.7-35B-A3B-CRACK-GGUF:Q4_K_M",
+        "dealignai  MiniCPM-V-4.7-35B-A3B CRACK (MoE VLM)  Q4_K_M  ~22 GB  HB-240:100% MMLU:75.5%  34K downloads",
+    ),
+    // ── 34B MoE class (DavidAU Qwen3-48B-A4B Savant, effective ~34B) ─────────
+    (
+        "hf.co/DavidAU/Qwen3-48B-A4B-Savant-Commander-Distill-12X-Closed-Open-Heretic-Uncensored-GGUF:Q4_K_M",
+        "DavidAU  Qwen3-48B-A4B Savant Heretic (MoE)  Q4_K_M  ~20 GB",
+    ),
+    // ── 35B class ────────────────────────────────────────────────────────────
+    // Sage-A1.5 Heretic Abliterated Uncensored (MoE VLM, mradermacher quant, 2026-10-23)
+    (
+        "hf.co/mradermacher/Sage-A1.5-Heretic-Abliterated-Uncensored-GGUF:Q4_K_M",
+        "mradermacher Sage-A1.5 Heretic Abliterated (MoE VLM)  Q4_K_M  [new 2026-10-23]",
+    ),
+    (
+        "hf.co/mradermacher/Sage-A1.5-Heretic-Abliterated-Uncensored-i1-GGUF:Q4_K_M",
+        "mradermacher Sage-A1.5 Heretic Abliterated imatrix (MoE VLM)  Q4_K_M  [new 2026-10-23]",
+    ),
+    // SC117 Qwen3.6-35B-A3B MoE uncensored heretic — 65K downloads
+    (
+        "hf.co/SC117/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-APEX-GGUF:Q4_K_M",
+        "SC117    Qwen3.6-35B-A3B Uncensored Heretic (MoE)  Q4_K_M  ~21 GB  65K downloads",
+    ),
+    // SC117 Ornith-1.0-35B Heretic — 25K downloads (flagship Ornith series)
+    (
+        "hf.co/SC117/Ornith-1.0-35B-Heretic-MTP-APEX-GGUF:Q4_K_M",
+        "SC117    Ornith-1.0-35B Heretic MTP APEX  Q4_K_M  ~21 GB  25K downloads",
+    ),
+    // SC117 Ornith-1.5-35B-A3B Heretic MoE — 14K downloads (MoE variant)
+    (
+        "hf.co/SC117/Ornith-1.5-35B-A3B-Heretic-MTP-APEX-GGUF:Q4_K_M",
+        "SC117    Ornith-1.5-35B-A3B Heretic (MoE)  Q4_K_M  ~21 GB  14K downloads",
+    ),
+    (
+        "hf.co/SC117/occamy-1.0-abliterated-FIT-GGUF:Q4_K_M",
+        "SC117    occamy-1.0 35B abliterated FIT  Q4_K_M  ~21 GB",
+    ),
+    // huihui-ai CyberStrike-OffSec-35B abliterated — built on oyildirim/CyberStrike-OffSec-35B
+    //   remove-refusals abliteration; offensive security / pentesting / tool-calling; 65K downloads
+    (
+        "hf.co/huihui-ai/Huihui-CyberStrike-OffSec-35B-abliterated-GGUF:Q4_K",
+        "huihui-ai  CyberStrike-OffSec-35B abliterated (pentest)  Q4_K  ~21 GB  65K downloads",
+    ),
+    // HauhauCS Qwen3.6-35B-A3B Aggressive — 0/465 refusals; 35B total / ~3B active
+    //   256 experts / 8 routed; Q4_K_M ~21 GB; 907K downloads
+    (
+        "hf.co/HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "HauhauCS  Qwen3.6-35B-A3B Aggressive (MoE 256exp/8act)  Q4_K_M  ~21 GB  0/465 refusals  907K downloads",
+    ),
+    // LuffyTheFox Qwen3.6-35B-A3B Genesis-Hermes — Marchenko-Pastur noise repair
+    //   552K downloads; Genesis method + Hermes function-calling on HauhauCS uncensored base
+    (
+        "hf.co/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Hermes-GGUF:Q4_K_M",
+        "LuffyTheFox  Qwen3.6-35B-A3B Genesis-Hermes (noise repair+fn-calling MoE)  Q4_K_M  ~21 GB  552K downloads",
+    ),
+    // ── 49B class (TheDrummer Valkyrie) ──────────────────────────────────────
+    // Valkyrie-49B v2.1 — NVIDIA Nemotron-Super-49B base, creative uncensored, 1.1K downloads
+    (
+        "hf.co/TheDrummer/Valkyrie-49B-v2.1-GGUF:Q4_K_M",
+        "TheDrummer  Valkyrie-49B v2.1 (Nemotron-Super base) uncensored  Q4_K_M  ~29 GB  1K downloads",
+    ),
+    // ── 40B class (expanded from Qwen3.6-27B, 96 layers) ────────────────────
+    // Qwen3.6-40B Deckard: ARC-C 0.651 (40B), 2M+ downloads, Claude 4.6 Opus distill,
+    //   variable-length reasoning, 1,275 tensors; ~50% more layers than 27B base
+    (
+        "hf.co/DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-40B Deckard Heretic (thinking)  Q4_K_M  ~24 GB  ARC-C:0.651 2M+dl",
+    ),
+    // Qwen3.6-40B Grand Intelligence Fable Fusion
+    (
+        "hf.co/DavidAU/Qwen3.6-40B-Grand-Intelligence-Fable-Fusion-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-40B Grand-Intelligence Heretic  Q4_K_M  ~24 GB",
+    ),
+    // Qwen3.6-40B Fable-Fusion-6-Core Deckard-Eleanor: 6-core cold fusion merge
+    (
+        "hf.co/DavidAU/Qwen3.6-40B-Fable-Fusion-6-Core-Deckard-Eleanor-Heretic-Uncensored-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M",
+        "DavidAU  Qwen3.6-40B 6-Core Deckard-Eleanor Heretic  Q4_K_M  ~24 GB",
+    ),
+    // dima6312 Flint-40B-A2.5B abliterated (NEW 2026-10-23): MITRE refusals 15%→0%
+    //   KL:0.0146, gsm8k:0.98, humaneval_plus:0.95, mmlu_pro:0.78, wmdp_cyber:0.60
+    //   abliterix + Optuna 50-trial search; Q4_K_M 24 GB; cybersecurity + code + MoE
+    (
+        "hf.co/dima6312/Flint-40B-A2.5B-abliterated-GGUF:Q4_K_M",
+        "dima6312  Flint-40B-A2.5B abliterated (cyber+code MoE)  Q4_K_M  ~24 GB  MITRE:0% gsm8k:0.98 humaneval:0.95  [new 2026-10-23]",
+    ),
+    // ── 70B–72B class ────────────────────────────────────────────────────────
+    // Llama-3.3-70B abliterated (huihui-ai base, mradermacher imatrix quant)
+    (
+        "hf.co/mradermacher/Llama-3.3-70B-Instruct-abliterated-i1-GGUF:Q4_K_M",
+        "mradermacher Llama-3.3-70B abliterated imatrix  Q4_K_M  ~43 GB",
+    ),
+    // Llama-3.1-70B abliterated (mradermacher)
+    (
+        "hf.co/mradermacher/Llama-3.1-70B-Instruct-abliterated-GGUF:Q4_K_M",
+        "mradermacher Llama-3.1-70B abliterated  Q4_K_M  ~43 GB",
+    ),
+    // Qwen2.5-72B abliterated (huihui-ai, via DevQuasar GGUF pack)
+    (
+        "hf.co/DevQuasar/huihui-ai.Qwen2.5-72B-Instruct-abliterated-GGUF:Q4_K_M",
+        "DevQuasar/huihui-ai  Qwen2.5-72B abliterated  Q4_K_M  ~43 GB",
+    ),
+    // dolphin-2.9.2-qwen2-72b (uncensored, bartowski quant)
+    (
+        "hf.co/bartowski/dolphin-2.9.2-qwen2-72b-GGUF:Q4_K_M",
+        "bartowski dolphin-2.9.2-qwen2-72b uncensored  Q4_K_M  ~43 GB",
+    ),
+    // dolphin-2.9-llama3-70b (uncensored, bartowski quant)
+    (
+        "hf.co/bartowski/dolphin-2.9-llama3-70b-GGUF:Q4_K_M",
+        "bartowski dolphin-2.9-llama3-70b uncensored  Q4_K_M  ~43 GB",
+    ),
+    // TheDrummer Anubis-70B v1.2 — Llama-3.3-70B base, creative uncensored, 2.7K downloads
+    (
+        "hf.co/TheDrummer/Anubis-70B-v1.2-GGUF:Q4_K_M",
+        "TheDrummer  Anubis-70B v1.2 (Llama-3.3 base) uncensored  Q4_K_M  ~43 GB  2.7K downloads",
+    ),
+    // ── 74B MoE class (NVIDIA Nemotron 3.5 Bolt) ─────────────────────────────
+    // Bolt architecture: NemotronH-Puzzle, 88 blocks (40 Mamba2 + 40 latent-MoE + 8 full-attn)
+    //   74B total / 9B active, C-RADIO-v4-H vision tower (multimodal), GPQA-D 86.43
+    (
+        "hf.co/DavidAU/NVIDIA-Nemotron-3.5-Bolt-Turbo-Brilliance-50x-74B-A9B-24GB-GGUF:Q4_K_M",
+        "DavidAU  Nemotron-3.5-Bolt 74B-A9B Turbo (LatentMoE)  Q4_K_M  ~24 GB  GPQA:86.43",
+    ),
+    // BoldingBuilds Bolt abliterated — abliteration applied to NVIDIA's own 24GB GGUF in-place
+    //   154/154 harmful prompts answered; 100 tensors edited (attn+MoE+Mamba); 4.4K downloads
+    (
+        "hf.co/BoldingBuilds/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-Abliterated-24GB-GGUF:Q4_K_M",
+        "BoldingBuilds  Bolt 74B-A9B abliterated (VLM LatentMoE)  22 GB  154/154 comply  4.4K downloads",
+    ),
+    // dealignai Bolt CRACK — CRACK methodology (3-tier abliteration) on Bolt, incl. imatrix
+    //   NemotronH 22 GB, speculative drafter (LiLiCorr) + mmproj included; 2.9K downloads
+    (
+        "hf.co/dealignai/Nemotron-3.5-Bolt-74B-A9B-CRACK-24GB-GGUF:Q4_K_M",
+        "dealignai  Bolt 74B-A9B CRACK (VLM LatentMoE imatrix)  ~22 GB  2.9K downloads",
+    ),
+    // ── 122B MoE class (SC117, Qwen3.5-122B-A10B) ────────────────────────────
+    (
+        "hf.co/SC117/Qwen3.5-122B-A10B-Uncensored-APEX-Compact-GGUF:Q4_K_M",
+        "SC117    Qwen3.5-122B-A10B Uncensored APEX (MoE)  Q4_K_M  ~60 GB",
+    ),
+    // mradermacher Qwen3.5-122B-A10B-abliterated (NEW 2026-10-23): pentest-tagged MoE
+    //   base: Chompa1422/Qwen3.5-122B-A10B-abliterated; tags: abliterated uncensored pentest qwen3.5
+    (
+        "hf.co/mradermacher/Qwen3.5-122B-A10B-abliterated-GGUF:Q4_K_M",
+        "mradermacher Qwen3.5-122B-A10B abliterated (pentest MoE)  Q4_K_M  ~74 GB  [new 2026-10-23]",
+    ),
+    // HauhauCS Qwen3.5-122B-A10B Aggressive — 0/465 refusals, K_P quants; 382K downloads
+    //   Q4_K_M 74 GB, VLM (mmproj included); MoE 122B / 10B active
+    (
+        "hf.co/HauhauCS/Qwen3.5-122B-A10B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "HauhauCS  Qwen3.5-122B-A10B Aggressive (MoE VLM K_P quants)  Q4_K_M  ~74 GB  0/465 refusals  382K downloads",
+    ),
+    // ── 177B class (GSQ-RCO sharded, requires Strata engine) ─────────────────
+    // Qwen3.8 Flash-Next: 125B LM + 51B n-gram embedding + 4B MTP = ~177B
+    // GPQA-Diamond 92.93 (IQ3_S measured), SC117 abliteration of GSQ-RCO quant
+    // IQ3_S = ~84 GB; needs Strata engine: github.com/Niko1221/Strata (port 8080, 64 GB+ RAM+VRAM)
+    (
+        "hf.co/DavidAU/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF:IQ3_S",
+        "DavidAU  177B Flash-Next Abliterated GSQ-RCO  IQ3_S  ~84 GB  GPQA:92.93  [Strata]",
+    ),
+    // huihui-ai Flash-Next v2 — updated abliteration (MoE), 2026-10-19
+    (
+        "hf.co/huihui-ai/Huihui-Qwen3.8-Flash-Next-abliterated-v2-GGUF:Q4_K_M",
+        "huihui-ai Qwen3.8-Flash-Next abliterated v2 (MoE)  Q4_K_M  ~84 GB  [new 2026-10-19]",
+    ),
+    // SC117 Qwen3.8-Flash-Next GSQ-RCO abliterated [2026-10-03]: 2.1M downloads
+    //   144 tensors transplanted; preserves GSQ quant exactly (per-tensor blake2b verified)
+    //   262K context; 55.1 GB IQ3_S; distinct from Swift-1.5 (this is the non-Swift variant)
+    (
+        "hf.co/SC117/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF:IQ3_S",
+        "SC117    177B Flash-Next GSQ-RCO abliterated  IQ3_S  ~55 GB  2.1M downloads [2026-10-03]  [Strata]",
+    ),
+    // SC117 Swift-1.5 — newest SC117 abliteration of Flash-Next GSQ-RCO
+    (
+        "hf.co/SC117/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF:IQ3_S",
+        "SC117    177B Swift-1.5 Flash-Next abliterated   IQ3_S  ~84 GB  [Strata]",
+    ),
+    (
+        "hf.co/DavidAU/Qwen3.8-Flash-Next-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-GGUF:IQ3_S",
+        "DavidAU  177B Flash-Next Turbo GSQ-RCO (base)   IQ3_S  ~84 GB  [Strata]",
+    ),
+];
+
+pub(crate) enum OssModelDetection {
+    /// Exactly one model is installed — use it automatically.
+    AutoSelected(String),
+    /// Zero or multiple models — show the picker.
+    NeedsSelection {
+        installed: Vec<String>,
+        can_pull: bool,
+        provider_id: String,
+        #[allow(dead_code)]
+        base_url: Option<String>,
+    },
+}
+
+pub(crate) struct OssModelResult {
+    pub(crate) model: String,
+    /// True when the model is not yet installed and must be pulled first.
+    pub(crate) needs_install: bool,
+}
+
+// An option row in the model picker.
+struct ModelOption {
+    id: String,
+    label: Line<'static>,
+    key: KeyCode,
+    is_installed: bool,
+    /// Optional score summary line shown in the detail pane (from HF catalog).
+    score_hint: String,
+}
+
+pub(crate) struct OssModelWidget {
+    server_label: String,
+    options: Vec<ModelOption>,
+    selected: usize,
+    done: bool,
+    result: Option<(String, bool)>, // (model_id, needs_install)
+}
+
+impl OssModelWidget {
+    fn new(server_label: &str, installed: &[String], can_pull: bool) -> Self {
+        let digit_keys: &[char] = &['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+        let mut options: Vec<ModelOption> = Vec::new();
+
+        for (i, id) in installed.iter().enumerate() {
+            let key = if i < digit_keys.len() {
+                KeyCode::Char(digit_keys[i])
+            } else {
+                KeyCode::Null
+            };
+            options.push(ModelOption {
+                id: id.clone(),
+                label: Line::from(Span::raw(id.clone())),
+                key,
+                is_installed: true,
+                score_hint: String::new(),
+            });
+        }
+
+        if can_pull {
+            let offset = installed.len();
+            // Prefer live catalog (scored + fresher) over the static fallback list.
+            let live_catalog = hf_catalog::load_catalog();
+            let catalog_pairs: Vec<(String, String, String)> =
+                if let Some(ref entries) = live_catalog {
+                    entries
+                        .iter()
+                        .map(|e| {
+                            (
+                                e.pull_id.clone(),
+                                e.display.clone(),
+                                e.benchmarks.score_summary(),
+                            )
+                        })
+                        .collect()
+                } else {
+                    PREFERRED_MODELS
+                        .iter()
+                        .map(|(id, disp)| (id.to_string(), disp.to_string(), String::new()))
+                        .collect()
+                };
+
+            for (i, (model_id, desc, score_hint)) in catalog_pairs.iter().enumerate() {
+                let already = installed.iter().any(|m| m.as_str() == model_id.as_str());
+                if already {
+                    continue;
+                }
+                let idx = offset + i;
+                let key = if idx < digit_keys.len() {
+                    KeyCode::Char(digit_keys[idx])
+                } else {
+                    KeyCode::Null
+                };
+                options.push(ModelOption {
+                    id: model_id.to_string(),
+                    label: Line::from(vec![
+                        Span::styled(
+                            "[install] ",
+                            Style::default().fg(ratatui::style::Color::Yellow),
+                        ),
+                        Span::raw(desc.to_string()),
+                    ]),
+                    key,
+                    is_installed: false,
+                    score_hint: score_hint.clone(),
+                });
+            }
+        }
+
+        Self {
+            server_label: server_label.to_string(),
+            options,
+            selected: 0,
+            done: false,
+            result: None,
+        }
+    }
+
+    pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<(String, bool)> {
+        if key.kind != KeyEventKind::Press {
+            return None;
+        }
+        let n = self.options.len();
+        match key {
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.result = Some(("__CANCELLED__".to_string(), false));
+                self.done = true;
+            }
+            _ if MOVE_LEFT_KEYS.is_pressed(key)
+                || matches!(key.code, KeyCode::Up | KeyCode::Char('k')) =>
+            {
+                if n > 0 {
+                    self.selected = (self.selected + n - 1) % n;
+                }
+            }
+            _ if MOVE_RIGHT_KEYS.is_pressed(key)
+                || matches!(key.code, KeyCode::Down | KeyCode::Char('j')) =>
+            {
+                if n > 0 {
+                    self.selected = (self.selected + 1) % n;
+                }
+            }
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => {
+                if n > 0 {
+                    let opt = &self.options[self.selected];
+                    self.result = Some((opt.id.clone(), !opt.is_installed));
+                    self.done = true;
+                }
+            }
+            KeyEvent { code, .. } => {
+                let norm = match code {
+                    KeyCode::Char(c) => KeyCode::Char(c.to_ascii_lowercase()),
+                    other => other,
+                };
+                if let Some(opt) = self.options.iter().find(|o| {
+                    matches!(o.key, KeyCode::Char(c) if KeyCode::Char(c.to_ascii_lowercase()) == norm)
+                }) {
+                    self.result = Some((opt.id.clone(), !opt.is_installed));
+                    self.done = true;
+                }
+            }
+        }
+        if self.done { self.result.clone() } else { None }
     }
 }
 
-async fn check_ollama_status(client: &HttpClient) -> ProviderStatus {
-    match check_port_status(client, DEFAULT_OLLAMA_PORT).await {
-        Ok(true) => ProviderStatus::Running,
-        Ok(false) => ProviderStatus::NotRunning,
-        Err(_) => ProviderStatus::Unknown,
+impl WidgetRef for &OssModelWidget {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        Clear.render(area, buf);
+        let mut column = FlexRenderable::new();
+        column.push(1, RenderableItem::Borrowed(&""));
+
+        let installed_count = self.options.iter().filter(|o| o.is_installed).count();
+        let title = if installed_count == 0 {
+            format!("No models installed on {}", self.server_label)
+        } else {
+            format!("Select a model — {}", self.server_label)
+        };
+        column.push(
+            0,
+            Paragraph::new(title.bold())
+                .wrap(Wrap { trim: false })
+                .inset(Insets::vh(0, 2)),
+        );
+
+        let subtitle = if installed_count == 0 {
+            "Choose a model to install:".to_string()
+        } else if self.options.len() > installed_count {
+            format!(
+                "{installed_count} installed  ·  press Enter or a digit to select, or [install] to download"
+            )
+        } else {
+            "↑/↓ to navigate".to_string()
+        };
+        column.push(
+            1,
+            Paragraph::new(Span::styled(
+                subtitle,
+                Style::default().add_modifier(Modifier::DIM),
+            ))
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(0, 2)),
+        );
+
+        let labels: Vec<Line<'static>> = self.options.iter().map(|o| o.label.clone()).collect();
+        column.push(0, picker_option_list(labels, self.selected));
+
+        if let Some(opt) = self.options.get(self.selected) {
+            let note = if opt.is_installed {
+                format!("Model: {}", opt.id)
+            } else {
+                format!("Will run: ollama pull {}", opt.id)
+            };
+            column.push(
+                1,
+                Paragraph::new(Span::styled(
+                    note,
+                    Style::default().add_modifier(Modifier::DIM),
+                ))
+                .wrap(Wrap { trim: false })
+                .inset(Insets::vh(0, 2)),
+            );
+            if !opt.score_hint.is_empty() {
+                column.push(
+                    0,
+                    Paragraph::new(Span::styled(
+                        opt.score_hint.clone(),
+                        Style::default().fg(ratatui::style::Color::Cyan),
+                    ))
+                    .wrap(Wrap { trim: false })
+                    .inset(Insets::vh(0, 2)),
+                );
+            }
+            if is_strata_model(&opt.id) {
+                column.push(
+                    0,
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(
+                            "★ 177B sharded model — use Strata engine: ",
+                            Style::default().fg(ratatui::style::Color::Yellow),
+                        ),
+                        Span::styled(
+                            "github.com/Niko1221/Strata  (port 8080, needs 32 GB+ RAM+VRAM)",
+                            Style::default()
+                                .fg(ratatui::style::Color::Yellow)
+                                .add_modifier(Modifier::DIM),
+                        ),
+                    ]))
+                    .wrap(Wrap { trim: false })
+                    .inset(Insets::vh(0, 2)),
+                );
+            }
+        }
+
+        column.push(
+            0,
+            Paragraph::new(Line::from(vec![
+                "↑/↓".bold(),
+                " choose · ".dim(),
+                key_hint::plain(KeyCode::Enter).into(),
+                " select · ".dim(),
+                key_hint::ctrl(KeyCode::Char('c')).into(),
+                " exit".dim(),
+            ]))
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(0, 2)),
+        );
+        column.push(1, RenderableItem::Borrowed(&""));
+
+        let panel = Rect {
+            height: column.desired_height(area.width).min(area.height),
+            ..area
+        };
+        render_menu_surface(panel, buf);
+        column.render(panel, buf);
     }
+}
+
+/// Returns true for 177B sharded models that benefit from the Strata engine.
+fn is_strata_model(id: &str) -> bool {
+    id.contains("GSQ-RCO") || id.contains("Flash-Next")
+}
+
+/// Fetch the model list from a running server's `/v1/models` endpoint.
+async fn fetch_models_from_url(url: &str) -> Vec<String> {
+    #[allow(deprecated)]
+    let client = HttpClientBuilder::new().build_direct_with_custom_ca_fallback();
+    let resp = match client.get(url).timeout(Duration::from_secs(4)).send().await {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+    let text = match resp.text().await {
+        Ok(t) => t,
+        Err(_) => return vec![],
+    };
+    let v: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+    // OpenAI format: {"data": [{"id": "model-name"}]}
+    // Ollama /v1/models: {"data": [{"id": "..."}]}
+    // Ollama /api/tags:  {"models": [{"name": "..."}]}
+    let mut names: Vec<String> = Vec::new();
+    if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
+        for item in arr {
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                names.push(id.to_string());
+            }
+        }
+    } else if let Some(arr) = v.get("models").and_then(|d| d.as_array()) {
+        for item in arr {
+            if let Some(id) = item.get("name").and_then(|v| v.as_str()) {
+                names.push(id.to_string());
+            }
+        }
+    }
+    names
+}
+
+/// Query the selected server and decide how to proceed with model selection.
+pub(crate) async fn detect_oss_model(
+    provider_id: &str,
+    base_url: Option<&str>,
+) -> OssModelDetection {
+    let models_url = match base_url {
+        Some(u) => format!("{u}/models"),
+        None if provider_id == OLLAMA_OSS_PROVIDER_ID => {
+            format!("http://localhost:{DEFAULT_OLLAMA_PORT}/v1/models")
+        }
+        None => {
+            format!("http://localhost:{DEFAULT_LMSTUDIO_PORT}/v1/models")
+        }
+    };
+    let installed = fetch_models_from_url(&models_url).await;
+
+    // Kick off a background catalog refresh so the next picker open has fresh
+    // HuggingFace scores.  Only when cache is absent or stale.
+    if hf_catalog::load_catalog().is_none() {
+        spawn_catalog_refresh();
+    }
+
+    match installed.len() {
+        1 => OssModelDetection::AutoSelected(installed.into_iter().next().unwrap()),
+        _ => OssModelDetection::NeedsSelection {
+            can_pull: provider_id == OLLAMA_OSS_PROVIDER_ID,
+            provider_id: provider_id.to_string(),
+            base_url: base_url.map(str::to_string),
+            installed,
+        },
+    }
+}
+
+/// Spawn a background task to refresh the HuggingFace model catalog and save
+/// it to the disk cache.  The result is available on the next picker open.
+/// Silently ignores failures — the picker falls back to PREFERRED_MODELS.
+pub(crate) fn spawn_catalog_refresh() {
+    tokio::spawn(async {
+        let entries = hf_catalog::refresh_catalog().await;
+        if !entries.is_empty() {
+            hf_catalog::save_catalog(&entries);
+        }
+    });
+}
+
+/// Show the interactive model picker and return the chosen model.
+pub(crate) async fn select_oss_model(
+    server_label: &str,
+    installed: Vec<String>,
+    can_pull: bool,
+) -> io::Result<OssModelResult> {
+    let mut widget = OssModelWidget::new(server_label, &installed, can_pull);
+
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let result = (|| {
+        terminal.draw(|f| (&widget).render_ref(f.area(), f.buffer_mut()))?;
+        crate::tui::discard_pending_terminal_input()?;
+        loop {
+            if let Event::Key(key_event) = event::read()?
+                && let Some((model_id, needs_install)) = widget.handle_key_event(key_event)
+            {
+                break Ok(OssModelResult {
+                    model: model_id,
+                    needs_install,
+                });
+            }
+            terminal.draw(|f| (&widget).render_ref(f.area(), f.buffer_mut()))?;
+        }
+    })();
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    result
+}
+
+/// Pull an Ollama model (`ollama pull <model>`) and stream its progress lines
+/// to a minimal full-screen TUI, returning when the pull is complete.
+pub(crate) async fn pull_oss_model_with_tui(model: &str) -> io::Result<()> {
+    // Spawn `ollama pull <model>`; both stdout and stderr carry progress text.
+    let mut child = tokio::process::Command::new("ollama")
+        .args(["pull", model])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| io::Error::other(format!("could not run `ollama pull`: {e}")))?;
+
+    let stdout = child.stdout.take().expect("stdout pipe");
+    let stderr = child.stderr.take().expect("stderr pipe");
+
+    enable_raw_mode()?;
+    let mut out = io::stdout();
+    execute!(out, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(out);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut lines: Vec<String> = vec![format!("Pulling {model} …")];
+    let mut stdout_reader = tokio::io::BufReader::new(stdout).lines();
+    let mut stderr_reader = tokio::io::BufReader::new(stderr).lines();
+
+    let model_owned = model.to_string();
+    let result = async {
+        loop {
+            // Drain any new lines from subprocess output.
+            loop {
+                match stdout_reader.next_line().await {
+                    Ok(Some(line)) => {
+                        // Ollama emits JSON progress lines; show the "status" field if present.
+                        let display =
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                                v.get("status")
+                                    .and_then(|s| s.as_str())
+                                    .map(str::to_string)
+                                    .unwrap_or(line)
+                            } else {
+                                line
+                            };
+                        lines.push(display);
+                    }
+                    _ => break,
+                }
+            }
+            loop {
+                match stderr_reader.next_line().await {
+                    Ok(Some(line)) if !line.is_empty() => lines.push(line),
+                    _ => break,
+                }
+            }
+
+            // Redraw.
+            terminal.draw(|f| render_pull_screen(f, &model_owned, &lines))?;
+
+            // Check for Ctrl+C.
+            if crossterm::event::poll(Duration::from_millis(100))? {
+                if let Event::Key(k) = event::read()? {
+                    if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
+                        let _ = child.kill().await;
+                        return Err(io::Error::other("cancelled"));
+                    }
+                }
+            }
+
+            // Check if process finished.
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    lines.push(if status.success() {
+                        format!("✓ {model_owned} ready")
+                    } else {
+                        format!("✗ ollama pull failed (exit {status})")
+                    });
+                    terminal.draw(|f| render_pull_screen(f, &model_owned, &lines))?;
+                    tokio::time::sleep(Duration::from_millis(800)).await;
+                    return if status.success() {
+                        Ok(())
+                    } else {
+                        Err(io::Error::other(format!("ollama pull failed: {status}")))
+                    };
+                }
+                Ok(None) => {}
+                Err(e) => return Err(e),
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+    .await;
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    result
+}
+
+fn render_pull_screen(f: &mut ratatui::Frame, model: &str, lines: &[String]) {
+    let area = f.area();
+    Clear.render(area, f.buffer_mut());
+    let mut column = FlexRenderable::new();
+    column.push(1, RenderableItem::Borrowed(&""));
+    column.push(
+        0,
+        Paragraph::new(format!("Installing  {model}").bold())
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(0, 2)),
+    );
+    column.push(1, RenderableItem::Borrowed(&""));
+
+    // Show last N lines of progress output.
+    let show: Vec<&str> = lines
+        .iter()
+        .rev()
+        .take(12)
+        .rev()
+        .map(String::as_str)
+        .collect();
+    for line in show {
+        let owned = line.to_string();
+        column.push(
+            0,
+            Paragraph::new(Span::styled(
+                owned,
+                Style::default().add_modifier(Modifier::DIM),
+            ))
+            .wrap(Wrap { trim: false })
+            .inset(Insets::vh(0, 2)),
+        );
+    }
+    column.push(1, RenderableItem::Borrowed(&""));
+    column.push(
+        0,
+        Paragraph::new(Line::from(vec![
+            key_hint::ctrl(KeyCode::Char('c')).into(),
+            " cancel".dim(),
+        ]))
+        .wrap(Wrap { trim: false })
+        .inset(Insets::vh(0, 2)),
+    );
+    column.push(1, RenderableItem::Borrowed(&""));
+
+    let panel = Rect {
+        height: column.desired_height(area.width).min(area.height),
+        ..area
+    };
+    render_menu_surface(panel, f.buffer_mut());
+    column.render(panel, f.buffer_mut());
 }
 
 async fn check_port_status(client: &HttpClient, port: u16) -> io::Result<bool> {
@@ -386,8 +1490,8 @@ async fn check_port_status(client: &HttpClient, port: u16) -> io::Result<bool> {
         .send()
         .await
     {
-        Ok(response) => Ok(response.status().is_success()),
-        Err(_) => Ok(false), // Connection failed = not running
+        Ok(_) => Ok(true), // Any response (even 404) means the server is up.
+        Err(_) => Ok(false),
     }
 }
 
@@ -397,7 +1501,23 @@ mod tests {
 
     #[test]
     fn ctrl_h_l_move_provider_selection() {
-        let mut widget = OssSelectionWidget::new(ProviderStatus::Unknown, ProviderStatus::Unknown);
+        let servers = vec![
+            DiscoveredServer {
+                provider_id: LMSTUDIO_OSS_PROVIDER_ID.to_string(),
+                port: DEFAULT_LMSTUDIO_PORT,
+                label: "LM Studio".to_string(),
+                description: "LM Studio".to_string(),
+                base_url: None,
+            },
+            DiscoveredServer {
+                provider_id: OLLAMA_OSS_PROVIDER_ID.to_string(),
+                port: DEFAULT_OLLAMA_PORT,
+                label: "Ollama".to_string(),
+                description: "Ollama".to_string(),
+                base_url: None,
+            },
+        ];
+        let mut widget = OssSelectionWidget::from_discovered(&servers);
 
         assert_eq!(widget.selected_option, 0);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));

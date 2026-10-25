@@ -13,7 +13,9 @@ pub use pull::TuiProgressReporter;
 use semver::Version;
 
 /// Default OSS model to use when `--oss` is passed without an explicit `-m`.
-pub const DEFAULT_OSS_MODEL: &str = "gpt-oss:20b";
+/// Default model — Qwen3 8B is available on Ollama and matches the YUGI preferred model list.
+/// Users can override with -m, e.g. `yugi -m hf.co/DavidAU/Drowzee-Gemma-3-12B-Abliterated-GGUF`
+pub const DEFAULT_OSS_MODEL: &str = "qwen3:8b";
 
 /// Prepare the local OSS environment when `--oss` is selected.
 ///
