@@ -8,4 +8,13 @@ ignore = [
     "RUSTSEC-2023-0089", # atomic-polyfill via postcard/heapless/pagable; upstream crate is unmaintained
     "RUSTSEC-2024-0320", # yaml-rust via syntect; remove when syntect drops or updates it
     "RUSTSEC-2025-0141", # bincode via syntect; remove when syntect drops or updates it
+    "RUSTSEC-2026-0118", # hickory-proto future advisory; no fixed release yet
+    "RUSTSEC-2026-0119", # hickory-proto future advisory; no fixed release yet
+    "RUSTSEC-2026-0194", # quick-xml future advisory; no fixed release yet
+    "RUSTSEC-2026-0195", # quick-xml future advisory; no fixed release yet
+    "RUSTSEC-2026-0370", # zvariant future advisory; no fixed release yet
+    "RUSTSEC-2026-0371", # zbus_names future advisory; no fixed release yet
+    "RUSTSEC-2026-0372", # zvariant_derive future advisory; no fixed release yet
+    "RUSTSEC-2026-0374", # basic-toml future advisory; no fixed release yet
+    "RUSTSEC-2026-0387", # future advisory; no fixed release yet
 ]
