@@ -1,0 +1,129 @@
+name: quality
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'codex-rs/**'
+      - '.github/workflows/quality.yml'
+      - '.github/actions/setup-ci/**'
+      - 'ruff.toml'
+
+jobs:
+  clippy:
+    name: Clippy lints
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        with:
+          components: clippy
+
+      - name: Cache Rust artifacts
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            codex-rs/target
+          key: cargo-clippy-${{ runner.os }}-${{ hashFiles('codex-rs/Cargo.lock') }}
+          restore-keys: |
+            cargo-clippy-${{ runner.os }}-
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check for a clean worktree
+        if: always() && !cancelled()
+        uses: ./.github/actions/check-clean-worktree
+
+  cargo-deny:
+    name: Cargo deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@82eb9f621fbc699dd0918f3ea06864c14cc84246 # v2
+        with:
+          rust-version: 1.99.1
+          manifest-path: ./codex-rs/Cargo.toml
+
+      - name: Check for a clean worktree
+        if: always() && !cancelled()
+        uses: ./.github/actions/check-clean-worktree
+
+  ruff:
+    name: Ruff lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check . --config ruff.toml
+
+      - name: Check for a clean worktree
+        if: always() && !cancelled()
+        uses: ./.github/actions/check-clean-worktree
+
+  # Aggregator job that must pass for PR checks
+  quality-results:
+    name: Quality gates (required)
+    needs: [clippy, cargo-deny, ruff]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check quality status
+        run: |
+          echo "## Quality Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Clippy**: ${{ needs.clippy.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cargo Deny**: ${{ needs.cargo-deny.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ruff**: ${{ needs.ruff.result }}" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.clippy.result }}" != "success" ]] || \
+             [[ "${{ needs.cargo-deny.result }}" != "success" ]] || \
+             [[ "${{ needs.ruff.result }}" != "success" ]]; then
+            echo "Quality checks failed" >&2
+            exit 1
+          fi

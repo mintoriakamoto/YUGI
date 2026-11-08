@@ -1,81 +1,145 @@
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+# YUGI — Claude Code Agent
 
----
+**YUGI** is a Rust-based implementation of Claude Code, an AI-powered coding agent that runs locally and operates directly in your development environment.
 
-## Quickstart
+## Quick Start
 
-### Installing and running Codex CLI
+Clone and build from source:
 
-Run the following on Mac or Linux to install Codex CLI:
+```bash
+git clone https://github.com/openai/codex.git
+cd codex/codex-rs
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
+# Install Rust toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
+# Install dependencies
+cargo install --locked just
+cargo install --locked cargo-nextest
+
+# Build and run
+cargo build --release
+./target/release/yugi "explain this codebase to me"
 ```
 
-Run the following on Windows to install Codex CLI:
+For detailed setup instructions, see [GETTING_STARTED.md](./GETTING_STARTED.md).
 
-```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+## What is YUGI?
+
+YUGI (the binary name for `codex-cli`) is an AI agent that:
+- Understands your codebase structure and context
+- Executes tasks: refactoring, testing, debugging, code review
+- Integrates with local tools: git, cargo, npm, shell commands
+- Runs entirely on your machine with configurable AI models
+- Provides a TUI and programmatic interfaces
+
+## Features
+
+- **Local-first**: Full control over code and model selection
+- **Modular**: 100+ crates with specialized responsibilities
+- **Extensible**: Plugin system for custom skills and integrations
+- **Hardened**: Process isolation, permission system, audit logging
+
+## System Requirements
+
+| Requirement | Details |
+|-------------|---------|
+| OS | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 (WSL2) |
+| RAM | 4 GB minimum (8 GB recommended) |
+| Git | 2.23+ recommended |
+
+## Building
+
+### Prerequisites
+
+- Rust 1.99+ (installed via rustup)
+- Python 3.9+
+- Standard development tools (gcc/clang, make)
+
+### From Source
+
+```bash
+cd codex/codex-rs
+cargo build --release
+
+# Validate build
+cargo test -p codex-cli
+
+# Run quick tests
+just test
 ```
 
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
+See [GETTING_STARTED.md](./GETTING_STARTED.md) for step-by-step instructions.
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
+## Known Limitations
+
+- **V8 Pre-built Artifacts**: CI uses pre-built rusty_v8 bindings; local builds may require additional setup
+- **Platform Coverage**: Primary testing on Linux x86_64; macOS and Windows support varies
+- **Dependencies**: GStreamer and other system libs must be available; versions may conflict
+- **Bazel Removal**: This fork removed Bazel infrastructure; uses pure Cargo/Rust builds
+
+See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for workarounds and [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) for detailed tracking.
+
+## Project Structure
+
+```
+codex-rs/
+├── cli/              # Main YUGI binary (codex-cli crate)
+├── app-server/       # Protocol and service layer
+├── core/             # Core agent logic
+├── exec/             # Command execution sandbox
+├── ext/              # Extensions (MCP, skills, web-search, etc.)
+├── hooks/            # Plugin system for custom behavior
+└── [90+ supporting crates]
 ```
 
-```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
+## Development
+
+### Formatting & Linting
+
+```bash
+just fmt              # Format code
+just fix -p <crate>  # Run clippy on a crate
 ```
 
-Codex CLI can also be installed via the following package managers:
+### Testing
 
-```shell
-# Install using npm
-npm install -g @openai/codex
+```bash
+just test            # Run full test suite via nextest
+just test -p cli     # Run tests for one crate
 ```
 
-```shell
-# Install using Homebrew
-brew install --cask codex
+### Logging & Debugging
+
+```bash
+RUST_LOG=debug ./target/debug/yugi <args>
+./target/debug/yugi -c log_dir=./logs <args>
 ```
 
-Then simply run `codex` to get started.
+## Documentation
 
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
+- [GETTING_STARTED.md](./GETTING_STARTED.md) — 15-minute quickstart for new developers
+- [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) — Common issues and fixes
+- [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) — Detailed issue tracking and workarounds
+- [docs/install.md](./docs/install.md) — Detailed build instructions
+- [docs/contributing.md](./docs/contributing.md) — Contribution guidelines
 
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
+## Contributing
 
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
+We do not accept external pull requests. Community contributions are welcome as:
+- Detailed bug reports with reproduction steps
+- Root-cause analysis and investigation
+- Feature requests and design discussions
 
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
+See [docs/contributing.md](./docs/contributing.md) for details.
 
-</details>
+## License
 
-### Using Codex with your ChatGPT plan
+Apache License 2.0 — See [LICENSE](./LICENSE)
 
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
+## Support
 
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+- **Issues**: Report bugs on [GitHub Issues](https://github.com/openai/codex/issues)
+- **Docs**: Comprehensive guides in `/docs` and `/GETTING_STARTED.md`
+- **CI Status**: [GitHub Actions](https://github.com/openai/codex/actions)
