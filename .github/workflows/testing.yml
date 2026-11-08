@@ -1,0 +1,131 @@
+name: testing
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'codex-rs/**'
+      - 'sdk/python/**'
+      - 'scripts/**'
+      - '.github/workflows/testing.yml'
+      - '.github/actions/setup-ci/**'
+
+jobs:
+  rust-tests:
+    name: Rust tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup CI environment
+        uses: ./.github/actions/setup-ci
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: cargo-nextest@0.9.72
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            codex-rs/target
+          key: cargo-test-${{ runner.os }}-${{ hashFiles('codex-rs/Cargo.lock') }}
+          restore-keys: |
+            cargo-test-${{ runner.os }}-
+
+      - name: Run tests (unix)
+        if: runner.os != 'Windows'
+        run: |
+          export RUST_MIN_STACK=8388608
+          export NEXTEST_PROFILE=ci
+          cargo nextest run --no-fail-fast
+        env:
+          RUST_MIN_STACK: 8388608
+
+      - name: Run tests (windows)
+        if: runner.os == 'Windows'
+        run: |
+          $env:RUST_MIN_STACK = "8388608"
+          $env:NEXTEST_PROFILE = "ci"
+          cargo nextest run --no-fail-fast
+        shell: powershell
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@3c2ca3e3e3c3c3e1e5a8a8e4e9d4e5f6g7h8i9j # v4
+        with:
+          name: rust-test-results
+          path: codex-rs/target/nextest/ci/
+          if-no-files-found: ignore
+
+      - name: Check for a clean worktree
+        if: always() && !cancelled()
+        uses: ./.github/actions/check-clean-worktree
+
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-cov
+
+      - name: Run Python tests
+        run: |
+          python -m pytest scripts/ sdk/python/tests/ -v --tb=short
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@3c2ca3e3e3c3e1e5a8a8e4e9d4e5f6g7h8i9j # v4
+        with:
+          name: python-coverage
+          path: htmlcov/
+          if-no-files-found: ignore
+
+  # Aggregator job for test results
+  test-results:
+    name: Test results (required)
+    needs: [rust-tests, python-tests]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check test status
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rust Tests**: ${{ needs.rust-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Python Tests**: ${{ needs.python-tests.result }}" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.rust-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.python-tests.result }}" != "success" ]]; then
+            echo "Test suite failed" >&2
+            exit 1
+          fi
