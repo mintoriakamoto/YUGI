@@ -6,6 +6,9 @@ packages:
 ignoredBuiltDependencies:
   - esbuild
 
+onlyBuiltDependencies:
+  - "@modelcontextprotocol/conformance"
+
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude: []
 
